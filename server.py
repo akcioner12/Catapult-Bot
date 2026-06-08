@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 import sqlite3
 
 logging.basicConfig(level=logging.INFO)
@@ -84,6 +85,9 @@ class CreateUserRequest(BaseModel):
 class UpdateUserRequest(BaseModel):
     calendly_link: Optional[str] = None
     catapult_ref:  Optional[str] = None
+
+    class Config:
+        extra = "allow"
 
 class CatapultWebhookPayload(BaseModel):
     """
