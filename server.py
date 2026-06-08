@@ -1,1 +1,294 @@
+"""
+Catapult Trade — Backend API
+Стек: FastAPI + SQLite (для старта) / легко переключить на Supabase/PostgreSQL
+"""
+
+import os
+import uuid
+import string
+import random
+import logging
+from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import sqlite3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Catapult Trade Bot API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # В проде ограничь своим доменом
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB_PATH          = os.getenv("DB_PATH", "catapult.db")
+WEBHOOK_SECRET   = os.getenv("WEBHOOK_SECRET", "change_this_secret")
+MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://your-miniapp.com")
+BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")  # внутренний адрес бота
+
+# ── База данных ───────────────────────────────────────────────────────────────
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id     TEXT    UNIQUE NOT NULL,
+            username        TEXT    DEFAULT '',
+            name            TEXT    NOT NULL,
+            ref_code        TEXT    UNIQUE NOT NULL,
+            inviter_ref     TEXT    DEFAULT NULL,
+            calendly_link   TEXT    DEFAULT NULL,
+            catapult_ref    TEXT    DEFAULT NULL,
+            qualify_exp     TEXT    DEFAULT NULL,
+            qualify_goal    TEXT    DEFAULT NULL,
+            qualify_time    TEXT    DEFAULT NULL,
+            onboarded       INTEGER DEFAULT 0,
+            created_at      TEXT    DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ref_code    ON users(ref_code);
+        CREATE INDEX IF NOT EXISTS idx_telegram_id ON users(telegram_id);
+        CREATE INDEX IF NOT EXISTS idx_inviter_ref ON users(inviter_ref);
+    """)
+    conn.commit()
+    conn.close()
+
+def generate_ref_code(name: str) -> str:
+    """Генерируем читаемый ref_code: NAME + 4 символа"""
+    clean = "".join(c.upper() for c in name if c.isalpha())[:4].ljust(4, "X")
+    suffix = "".join(random.choices(string.digits + string.ascii_uppercase, k=4))
+    return f"{clean}{suffix}"
+
+# ── Pydantic модели ───────────────────────────────────────────────────────────
+
+class CreateUserRequest(BaseModel):
+    telegram_id:  str
+    username:     str = ""
+    name:         str
+    inviter_ref:  Optional[str] = None
+    qualify_data: Optional[dict] = None
+
+class UpdateUserRequest(BaseModel):
+    calendly_link: Optional[str] = None
+    catapult_ref:  Optional[str] = None
+
+class CatapultWebhookPayload(BaseModel):
+    """
+    Структура вебхука от Catapult Trade.
+    Уточни поля под реальный формат их API.
+    """
+    event:       str           # "user.registered"
+    ref_code:    str           # реф. код твоей сети (чей Mini App открыл пользователь)
+    user_id:     str           # ID нового пользователя на платформе
+    email:       Optional[str] = None
+
+# ── Эндпоинты — пользователи ──────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup():
+    init_db()
+    logger.info("DB initialized")
+
+@app.post("/users", status_code=201)
+async def create_user(data: CreateUserRequest):
+    conn = get_db()
+    try:
+        # Уникальный ref_code
+        for _ in range(10):
+            ref_code = generate_ref_code(data.name)
+            existing = conn.execute("SELECT id FROM users WHERE ref_code=?", (ref_code,)).fetchone()
+            if not existing:
+                break
+
+        q = data.qualify_data or {}
+        conn.execute("""
+            INSERT INTO users
+                (telegram_id, username, name, ref_code, inviter_ref,
+                 qualify_exp, qualify_goal, qualify_time)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (
+            data.telegram_id, data.username, data.name, ref_code,
+            data.inviter_ref,
+            q.get("exp"), q.get("goal"), q.get("time")
+        ))
+        conn.commit()
+
+        user = conn.execute("SELECT * FROM users WHERE ref_code=?", (ref_code,)).fetchone()
+        return dict(user)
+
+    except sqlite3.IntegrityError:
+        # Пользователь уже существует — возвращаем существующего
+        user = conn.execute(
+            "SELECT * FROM users WHERE telegram_id=?", (data.telegram_id,)
+        ).fetchone()
+        if user:
+            return dict(user)
+        raise HTTPException(400, "User already exists")
+    finally:
+        conn.close()
+
+@app.get("/users/{ref_code_or_id}")
+async def get_user(ref_code_or_id: str):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT * FROM users WHERE ref_code=? OR telegram_id=?",
+        (ref_code_or_id, ref_code_or_id)
+    ).fetchone()
+    conn.close()
+    if not user:
+        raise HTTPException(404, "User not found")
+    return dict(user)
+
+@app.patch("/users/by-telegram/{telegram_id}")
+async def update_user(telegram_id: str, data: UpdateUserRequest):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT * FROM users WHERE telegram_id=?", (telegram_id,)
+    ).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(404, "User not found")
+
+    updates, params = [], []
+    if data.calendly_link is not None:
+        updates.append("calendly_link=?")
+        params.append(data.calendly_link)
+    if data.catapult_ref is not None:
+        updates.append("catapult_ref=?")
+        params.append(data.catapult_ref)
+
+    if updates:
+        params.append(telegram_id)
+        conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE telegram_id=?", params
+        )
+        conn.commit()
+
+    user = conn.execute(
+        "SELECT * FROM users WHERE telegram_id=?", (telegram_id,)
+    ).fetchone()
+    conn.close()
+    return dict(user)
+
+@app.get("/users/{ref_code}/referrals")
+async def get_referrals(ref_code: str):
+    """Список всех рефералов пользователя"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT telegram_id, name, username, ref_code, created_at FROM users WHERE inviter_ref=?",
+        (ref_code,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# ── Эндпоинт — вебхук от Catapult Trade ──────────────────────────────────────
+
+@app.post("/webhook/catapult")
+async def catapult_webhook(
+    payload: CatapultWebhookPayload,
+    request: Request,
+    x_webhook_secret: str = Header(default="")
+):
+    """
+    Catapult Trade вызывает этот endpoint при регистрации нового пользователя.
+    Настрой URL вебхука в личном кабинете Catapult Trade:
+      https://your-backend.com/webhook/catapult
+    """
+    # Верификация подлинности вебхука
+    if x_webhook_secret != WEBHOOK_SECRET:
+        raise HTTPException(403, "Invalid webhook secret")
+
+    if payload.event != "user.registered":
+        return {"status": "ignored", "event": payload.event}
+
+    logger.info(f"Webhook: new user via ref={payload.ref_code}")
+
+    conn = get_db()
+
+    # Находим пригласителя по ref_code из вебхука
+    inviter = conn.execute(
+        "SELECT * FROM users WHERE ref_code=? OR catapult_ref=?",
+        (payload.ref_code, payload.ref_code)
+    ).fetchone()
+
+    if not inviter:
+        conn.close()
+        logger.warning(f"Inviter not found for ref_code={payload.ref_code}")
+        return {"status": "inviter_not_found"}
+
+    # Отмечаем, что пользователь прошёл онбординг на Catapult
+    conn.execute(
+        "UPDATE users SET onboarded=1 WHERE id=?", (inviter["id"],)
+    )
+    conn.commit()
+    conn.close()
+
+    # Отправляем онбординг-сообщение через бота
+    # (бот слушает внутренний API на порту 8001)
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            await client.post(f"{BOT_API_URL}/internal/onboard", json={
+                "telegram_id": inviter["telegram_id"],
+                "name":        inviter["name"],
+                "ref_code":    inviter["ref_code"],
+            }, timeout=5)
+    except Exception as e:
+        logger.error(f"Failed to notify bot: {e}")
+
+    return {"status": "ok", "inviter_ref_code": inviter["ref_code"]}
+
+# ── Эндпоинт — Mini App данные ────────────────────────────────────────────────
+
+@app.get("/miniapp-data/{ref_code}")
+async def miniapp_data(ref_code: str):
+    """
+    Mini App вызывает этот endpoint чтобы получить данные владельца.
+    Возвращает только публичные поля.
+    """
+    conn = get_db()
+    user = conn.execute(
+        "SELECT name, username, ref_code, calendly_link FROM users WHERE ref_code=?",
+        (ref_code,)
+    ).fetchone()
+    conn.close()
+
+    if not user:
+        raise HTTPException(404, "Not found")
+
+    user = dict(user)
+
+    # Формируем ссылку для кнопки "Записаться"
+    if user.get("calendly_link"):
+        booking_url = user["calendly_link"]
+    elif user.get("username"):
+        booking_url = f"https://t.me/{user['username']}"
+    else:
+        booking_url = None
+
+    return {
+        "name":         user["name"],
+        "ref_code":     user["ref_code"],
+        "booking_url":  booking_url,
+        "miniapp_url":  f"{MINIAPP_URL}?ref={user['ref_code']}",
+        "catapult_ref_link": f"https://catapulttrade.io/register?ref={user['ref_code']}",
+    }
+
+# ── Запуск ────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
