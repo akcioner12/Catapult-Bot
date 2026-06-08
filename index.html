@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Catapult Trade</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --tg-blue:   #2AABEE;
+    --tg-dark:   #1a1a2e;
+    --accent:    #2AABEE;
+    --surface:   #ffffff;
+    --surface2:  #f4f6f9;
+    --text:      #1a1a2e;
+    --text2:     #6b7280;
+    --border:    rgba(0,0,0,0.08);
+    --radius:    14px;
+    --radius-sm: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface:  #1e2130;
+      --surface2: #262b3d;
+      --text:     #f0f2f8;
+      --text2:    #8b95aa;
+      --border:   rgba(255,255,255,0.08);
+    }
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    background: var(--surface2);
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 24px;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: var(--tg-blue);
+    padding: 20px 16px 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -20px; left: 0; right: 0;
+    height: 40px;
+    background: var(--surface2);
+    border-radius: 20px 20px 0 0;
+  }
+  .header-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+  }
+  .avatar {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 600; color: #fff;
+    flex-shrink: 0;
+    border: 2px solid rgba(255,255,255,0.4);
+  }
+  .header-name { color: #fff; font-size: 17px; font-weight: 600; }
+  .header-sub  { color: rgba(255,255,255,0.8); font-size: 13px; margin-top: 2px; }
+
+  /* ── CTA кнопка Записаться ── */
+  .book-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: calc(100% - 32px);
+    margin: 0 16px 16px;
+    padding: 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.15s;
+  }
+  .book-btn:active { opacity: 0.85; }
+  .book-btn svg { flex-shrink: 0; }
+
+  /* ── Секции ── */
+  .section { margin: 0 16px 12px; }
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .card-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .card-row:last-child { border-bottom: none; }
+  .card-row:active { background: var(--surface2); }
+  .row-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .icon-blue   { background: #e8f3fd; }
+  .icon-green  { background: #e8f7ee; }
+  .icon-amber  { background: #fef4e4; }
+  .icon-purple { background: #f0eeff; }
+  .row-text  { flex: 1; }
+  .row-label { font-size: 14px; font-weight: 500; color: var(--text); }
+  .row-desc  { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .row-arrow { color: var(--text2); font-size: 18px; }
+
+  /* ── Реф. блок ── */
+  .ref-block {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+  }
+  .ref-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .ref-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ref-link {
+    flex: 1;
+    font-size: 13px;
+    color: var(--accent);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .copy-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.1s;
+  }
+  .copy-btn:active { background: var(--border); }
+  .copy-done { color: #16a34a; }
+
+  /* ── Шиммер (загрузка) ── */
+  .shimmer {
+    background: linear-gradient(90deg, var(--border) 25%, var(--surface) 50%, var(--border) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.2s infinite;
+    border-radius: 6px;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .shimmer-text { height: 16px; margin: 4px 0; }
+  .shimmer-btn  { height: 52px; border-radius: var(--radius); }
+
+  /* ── Модальные экраны ── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex; align-items: flex-end;
+    z-index: 100;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal-sheet {
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    width: 100%;
+    padding: 20px 20px 40px;
+    max-height: 80vh;
+    overflow-y: auto;
+    transform: translateY(100%);
+    transition: transform 0.25s cubic-bezier(.32,.72,0,1);
+  }
+  .modal-overlay.open .modal-sheet { transform: translateY(0); }
+  .modal-handle {
+    width: 36px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+  .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+  .modal-text  { font-size: 14px; line-height: 1.7; color: var(--text2); }
+  .modal-text b { color: var(--text); }
+  .modal-close {
+    margin-top: 20px;
+    width: 100%;
+    padding: 14px;
+    background: var(--surface2);
+    border: none;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  /* ── Бейдж ── */
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 20px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .badge-new { background: #dcfce7; color: #15803d; }
+
+  .error-state {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--text2);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Состояние загрузки ── -->
+<div id="loading" style="padding: 16px;">
+  <div class="header" style="border-radius: var(--radius); margin-bottom: 12px; height: 100px;">
+    <div class="shimmer shimmer-text" style="width:60%; margin-top:8px;"></div>
+    <div class="shimmer shimmer-text" style="width:40%;"></div>
+  </div>
+  <div class="shimmer shimmer-btn" style="margin-bottom:12px;"></div>
+  <div class="shimmer shimmer-btn"></div>
+</div>
+
+<!-- ── Основной экран (скрыт до загрузки) ── -->
+<div id="app" style="display:none;">
+
+  <div class="header">
+    <div class="header-inner">
+      <div class="avatar" id="avatar">CT</div>
+      <div>
+        <div class="header-name" id="ownerName">Catapult Trade</div>
+        <div class="header-sub">Ваш персональный гид</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Главная CTA -->
+  <a id="bookBtn" class="book-btn" href="#" target="_blank" onclick="handleBook(event)">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+      <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.01 1.18 2 2 0 012 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/>
+    </svg>
+    Записаться на созвон
+  </a>
+
+  <!-- Навигация -->
+  <div class="section">
+    <div class="section-title">Возможности</div>
+    <div class="card">
+      <div class="card-row" onclick="openModal('about')">
+        <div class="row-icon icon-blue">🚀</div>
+        <div class="row-text">
+          <div class="row-label">О проекте <span class="badge badge-new">Листинг</span></div>
+          <div class="row-desc">Что такое Catapult Trade и как работает</div>
+        </div>
+        <div class="row-arrow">›</div>
+      </div>
+      <div class="card-row" onclick="openModal('trading')">
+        <div class="row-icon icon-green">📈</div>
+        <div class="row-text">
+          <div class="row-label">Как торговать</div>
+          <div class="row-desc">Пошаговая инструкция для старта</div>
+        </div>
+        <div class="row-arrow">›</div>
+      </div>
+      <div class="card-row" onclick="openModal('tokens')">
+        <div class="row-icon icon-amber">💰</div>
+        <div class="row-text">
+          <div class="row-label">Поинты → токены</div>
+          <div class="row-desc">Механика обмена и таймлайн листинга</div>
+        </div>
+        <div class="row-arrow">›</div>
+      </div>
+      <div class="card-row" onclick="openModal('faq')">
+        <div class="row-icon icon-purple">❓</div>
+        <div class="row-text">
+          <div class="row-label">FAQ</div>
+          <div class="row-desc">Ответы на частые вопросы</div>
+        </div>
+        <div class="row-arrow">›</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Реф. ссылка -->
+  <div class="section">
+    <div class="section-title">Твоя реферальная ссылка</div>
+    <div class="ref-block">
+      <div class="ref-label">Зарегистрируйся и начни зарабатывать поинты</div>
+      <div class="ref-row">
+        <span class="ref-link" id="refLink">catapulttrade.io/ref/...</span>
+        <button class="copy-btn" id="copyBtn" onclick="copyRef()">Копировать</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Ошибка ── -->
+<div id="errorState" class="error-state" style="display:none;">
+  <div style="font-size:40px;margin-bottom:12px;">🔍</div>
+  Пользователь не найден.<br>Проверь ссылку и попробуй снова.
+</div>
+
+<!-- ── Модальные окна ── -->
+<div class="modal-overlay" id="modal" onclick="closeModalOnBg(event)">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-text"  id="modalBody"></div>
+    <button class="modal-close" onclick="closeModal()">Закрыть</button>
+  </div>
+</div>
+
+<script>
+const API_URL = "https://your-backend.com"; // ← замени на свой backend URL
+
+const MODALS = {
+  about: {
+    title: "О проекте Catapult Trade",
+    body: `
+      <b>Catapult Trade</b> — торговая платформа нового поколения, где каждое твоё действие конвертируется в реальную ценность.<br><br>
+      <b>Как это работает:</b><br>
+      • Регистрируешься по реф. ссылке<br>
+      • Торгуешь на платформе — получаешь поинты<br>
+      • Поинты конвертируются в токены платформы<br>
+      • На листинге токены можно продать<br><br>
+      <b>Почему сейчас:</b> проект на ранней стадии. Ранние участники получают максимальную долю токенов при минимальных вложениях усилий.
+    `
+  },
+  trading: {
+    title: "Как начать торговать",
+    body: `
+      <b>Шаг 1.</b> Зарегистрируйся по реф. ссылке ниже — это обязательно для зачисления поинтов.<br><br>
+      <b>Шаг 2.</b> Пройди верификацию аккаунта (KYC) — занимает 5–10 минут.<br><br>
+      <b>Шаг 3.</b> Пополни баланс — минимальная сумма для старта небольшая.<br><br>
+      <b>Шаг 4.</b> Открывай сделки — каждая сделка приносит поинты. Чем больше объём, тем больше поинтов.<br><br>
+      <b>Совет:</b> Записаться на созвон — я расскажу, как торговать эффективно именно под твои цели.
+    `
+  },
+  tokens: {
+    title: "Поинты → токены → прибыль",
+    body: `
+      <b>Механика поинтов:</b><br>
+      Каждая совершённая сделка приносит поинты. Объём сделки, её длительность и частота — всё влияет на количество поинтов.<br><br>
+      <b>Конвертация:</b><br>
+      По завершении аккумуляционного периода поинты конвертируются в токены платформы по зафиксированному курсу.<br><br>
+      <b>Листинг:</b><br>
+      Токены выходят на биржу — там их можно продать по рыночной цене. Ранние участники накапливают токены по самому выгодному курсу.<br><br>
+      <b>Реф. программа:</b><br>
+      Ты также получаешь % от поинтов своих рефералов — пассивный доход без дополнительных усилий.
+    `
+  },
+  faq: {
+    title: "Частые вопросы",
+    body: `
+      <b>Нужен ли опыт в торговле?</b><br>
+      Нет. Я провожу бесплатный созвон, где объясняю всё с нуля.<br><br>
+      <b>Сколько нужно вложить?</b><br>
+      Минимальный порог небольшой. Поинты начисляются с первой сделки.<br><br>
+      <b>Это безопасно?</b><br>
+      Catapult Trade — регулируемая платформа. На созвоне разберём все детали.<br><br>
+      <b>Когда листинг?</b><br>
+      Дата объявлена. Подробности — на созвоне, актуальная информация меняется.<br><br>
+      <b>Могу я сам приглашать людей?</b><br>
+      Да. После регистрации тебе автоматически создаётся такой же Mini App с твоей ссылкой.
+    `
+  }
+};
+
+let refLink = "";
+let bookingUrl = "";
+
+// ── Инициализация ──────────────────────────────────────────────────────────
+
+async function init() {
+  // Инициализация Telegram Web App
+  if (window.Telegram?.WebApp) {
+    Telegram.WebApp.ready();
+    Telegram.WebApp.expand();
+  }
+
+  // Берём ref_code из URL
+  const params = new URLSearchParams(window.location.search);
+  const refCode = params.get("ref");
+
+  if (!refCode) {
+    showError();
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/miniapp-data/${refCode}`);
+    if (!res.ok) throw new Error("Not found");
+    const data = await res.json();
+    renderApp(data);
+  } catch (e) {
+    showError();
+  }
+}
+
+function renderApp(data) {
+  // Аватар (первые 2 буквы имени)
+  const initials = (data.name || "CT").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
+  document.getElementById("avatar").textContent = initials;
+  document.getElementById("ownerName").textContent = data.name;
+
+  // Реф. ссылка
+  refLink = data.catapult_ref_link || "";
+  document.getElementById("refLink").textContent = refLink.replace("https://", "");
+
+  // Кнопка записи на созвон
+  bookingUrl = data.booking_url || "";
+  const btn = document.getElementById("bookBtn");
+  if (!bookingUrl) {
+    btn.style.opacity = "0.5";
+    btn.style.pointerEvents = "none";
+    btn.querySelector("svg").outerHTML = "";
+    btn.textContent = "Созвон скоро появится";
+  }
+
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("app").style.display = "block";
+}
+
+function showError() {
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("errorState").style.display = "block";
+}
+
+// ── Действия ───────────────────────────────────────────────────────────────
+
+function handleBook(e) {
+  if (!bookingUrl) return;
+  e.preventDefault();
+  if (window.Telegram?.WebApp) {
+    Telegram.WebApp.openLink(bookingUrl);
+  } else {
+    window.open(bookingUrl, "_blank");
+  }
+}
+
+function copyRef() {
+  if (!refLink) return;
+  navigator.clipboard.writeText(refLink).then(() => {
+    const btn = document.getElementById("copyBtn");
+    btn.textContent = "Скопировано ✓";
+    btn.classList.add("copy-done");
+    setTimeout(() => {
+      btn.textContent = "Копировать";
+      btn.classList.remove("copy-done");
+    }, 2000);
+  });
+}
+
+// ── Модалки ────────────────────────────────────────────────────────────────
+
+function openModal(key) {
+  const m = MODALS[key];
+  document.getElementById("modalTitle").textContent = m.title;
+  document.getElementById("modalBody").innerHTML = m.body;
+  document.getElementById("modal").classList.add("open");
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+}
+
+function closeModalOnBg(e) {
+  if (e.target === document.getElementById("modal")) closeModal();
+}
+
+// ── Старт ──────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
