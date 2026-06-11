@@ -1,43 +1,32 @@
 """
-Автопарсер контента для ТГ канала
-- Парсит посты из тематических каналов
-- Переписывает через Claude API в стиль канала
-- Отправляет на одобрение в 9:00, 13:00, 17:00, 20:00
-- Публикует в канал после одобрения
+Автопарсер контента — без Telethon, через публичный веб-интерфейс Telegram
+Читает посты через t.me/s/channel_name
 """
 
 import os
 import asyncio
 import logging
-import json
 import random
-from datetime import datetime, time
-from typing import Optional
+import re
+from datetime import datetime
 
 import httpx
+from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
-from telethon import TelegramClient
-from telethon.tl.functions.channels import GetFullChannelRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
-BOT_TOKEN       = os.getenv("BOT_TOKEN")
-ADMIN_TG_ID     = int(os.getenv("ADMIN_TG_ID", "0"))   # твой Telegram ID
-CHANNEL_ID      = os.getenv("CHANNEL_ID", "@Crypto_AI_Forex")
-CLAUDE_API_KEY  = os.getenv("CLAUDE_API_KEY", "")
+BOT_TOKEN      = os.getenv("BOT_TOKEN")
+ADMIN_TG_ID    = int(os.getenv("ADMIN_TG_ID", "0"))
+CHANNEL_ID     = os.getenv("CHANNEL_ID", "@Crypto_AI_Forex")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
-# Telethon (для чтения каналов)
-TG_API_ID       = int(os.getenv("TG_API_ID", "0"))
-TG_API_HASH     = os.getenv("TG_API_HASH", "")
-TG_PHONE        = os.getenv("TG_PHONE", "")
-
-CLAUDE_API_URL  = "https://api.anthropic.com/v1/messages"
-
-# ── Каналы для мониторинга ────────────────────────────────────────────────────
+# ── Каналы ────────────────────────────────────────────────────────────────────
 CHANNELS = {
     "crypto": [
         "crypto_Iemon", "to_the_makemoney", "cryptocurrencyfore_dumbs",
@@ -56,18 +45,17 @@ CHANNELS = {
     ]
 }
 
-# Расписание публикаций (UTC+3 Киев)
+# Расписание (UTC — Киев UTC+3)
 SCHEDULE_TIMES = [
-    {"hour": 6,  "minute": 0,  "category": "crypto"},   # 9:00 Киев
-    {"hour": 10, "minute": 0,  "category": "ai"},        # 13:00 Киев
-    {"hour": 14, "minute": 0,  "category": "forex"},     # 17:00 Киев
-    {"hour": 17, "minute": 0,  "category": "crypto"},    # 20:00 Киев
+    {"hour": 6,  "minute": 0,  "category": "crypto"},
+    {"hour": 10, "minute": 0,  "category": "ai"},
+    {"hour": 14, "minute": 0,  "category": "forex"},
+    {"hour": 17, "minute": 0,  "category": "crypto"},
 ]
 
-# Хранилище ожидающих постов { message_id: post_data }
+# Ожидающие посты
 pending_posts = {}
 
-# ── Подпись канала ─────────────────────────────────────────────────────────────
 CHANNEL_SIGNATURE = """
 
 ———
@@ -75,39 +63,84 @@ CHANNEL_SIGNATURE = """
 
 ▶️ [YouTube]() | 💬 [TG Chat]() | 🎵 [TikTok]() | 📷 [Instagram]() | 🤖 [TG Bot](https://t.me/catapulttrade_guide_bot) | 🐦 [Twitter]()"""
 
+# ── Парсинг через t.me/s/ ─────────────────────────────────────────────────────
+
+async def fetch_channel_posts(channel: str, limit: int = 10) -> list:
+    """Читает посты из публичного канала через t.me/s/"""
+    posts = []
+    url = f"https://t.me/s/{channel}"
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=15
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.warning(f"Cannot fetch {channel}: {resp.status_code}")
+                return []
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            messages = soup.find_all("div", class_="tgme_widget_message_text")
+
+            for msg in messages[-limit:]:
+                text = msg.get_text(separator="\n").strip()
+                if len(text) > 100:
+                    posts.append({
+                        "text": text,
+                        "channel": channel
+                    })
+    except Exception as e:
+        logger.warning(f"Error fetching {channel}: {e}")
+    return posts
+
+async def get_best_post(category: str) -> dict | None:
+    """Берёт случайный пост из категории"""
+    channels = CHANNELS.get(category, [])
+    random.shuffle(channels)
+
+    for channel in channels[:5]:
+        posts = await fetch_channel_posts(channel, limit=10)
+        if posts:
+            post = random.choice(posts)
+            logger.info(f"Got post from @{channel} ({len(post['text'])} chars)")
+            return post
+        await asyncio.sleep(1)
+
+    return None
+
 # ── Claude API ────────────────────────────────────────────────────────────────
 
-async def rewrite_with_claude(original_text: str, category: str) -> str:
-    """Переписывает пост через Claude API в стиль канала"""
+async def rewrite_with_claude(text: str, category: str) -> str:
+    """Переписывает пост через Claude в стиль канала"""
 
     category_context = {
-        "crypto": "криптовалюты, Bitcoin, альткоины, DeFi, блокчейн",
-        "ai": "искусственный интеллект, нейросети, AI инструменты, автоматизация",
-        "forex": "Forex, валютные пары, трейдинг, технический анализ"
+        "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi",
+        "ai":     "искусственный интеллект, нейросети, AI инструменты",
+        "forex":  "Forex, валютные пары, трейдинг"
     }
 
     prompt = f"""Ты — автор Telegram канала о {category_context.get(category, 'финансах')}.
 
-Перепиши следующий пост в стиле канала. Правила:
-1. Начни с приветствия с эмодзи (👋 Друзья, и т.п.)
-2. Используй эмодзи в начале каждого абзаца
-3. Ключевые мысли выдели **жирным**
+Перепиши пост в стиле канала. Правила:
+1. Начни с 👋 Друзья, ... или похожего приветствия
+2. Каждый абзац начинай с тематического эмодзи
+3. Ключевые мысли — **жирным**
 4. Второстепенное — _курсивом_
-5. Цитаты или важные правила — оформи как цитату (> текст)
-6. В конце добавь призыв подписаться или перейти в бот
-7. Пиши живо, от первого лица, как будто сам торгуешь
-8. Упомяни @catapulttrade_guide_bot если уместно
-9. Длина — 150-250 слов
-10. НЕ копируй оригинал дословно — перескажи своими словами
+5. Важные правила оформляй цитатой (> текст)
+6. В конце — призыв подписаться или перейти в бота @catapulttrade_guide_bot
+7. Пиши живо, от первого лица
+8. 150-250 слов
+9. НЕ копируй дословно — перескажи своими словами
 
-Оригинальный пост:
-{original_text}
+Оригинал:
+{text[:1500]}
 
-Напиши только готовый пост, без пояснений."""
+Только готовый пост, без пояснений."""
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
                 CLAUDE_API_URL,
                 headers={
                     "x-api-key": CLAUDE_API_KEY,
@@ -118,112 +151,58 @@ async def rewrite_with_claude(original_text: str, category: str) -> str:
                     "model": "claude-sonnet-4-20250514",
                     "max_tokens": 1000,
                     "messages": [{"role": "user", "content": prompt}]
-                },
-                timeout=30
+                }
             )
-            data = response.json()
+            data = resp.json()
             return data["content"][0]["text"]
     except Exception as e:
-        logger.error(f"Claude API error: {e}")
-        return original_text
-
-# ── Telethon парсер ───────────────────────────────────────────────────────────
-
-async def get_recent_posts(client: TelegramClient, channel: str, limit: int = 20) -> list:
-    """Получает последние посты из канала"""
-    posts = []
-    try:
-        async for message in client.iter_messages(channel, limit=limit):
-            if message.text and len(message.text) > 100:
-                posts.append({
-                    "text": message.text,
-                    "views": getattr(message, "views", 0) or 0,
-                    "date": message.date,
-                    "channel": channel
-                })
-    except Exception as e:
-        logger.warning(f"Cannot parse {channel}: {e}")
-    return posts
-
-async def get_best_post(client: TelegramClient, category: str) -> Optional[dict]:
-    """Берёт лучший пост из категории по количеству просмотров"""
-    channels = CHANNELS.get(category, [])
-    random.shuffle(channels)  # Рандомизируем чтобы не брать всегда из одного
-
-    all_posts = []
-    for channel in channels[:5]:  # Берём из 5 случайных каналов
-        posts = await get_recent_posts(client, channel, limit=10)
-        all_posts.extend(posts)
-
-    if not all_posts:
-        return None
-
-    # Сортируем по просмотрам и берём топ
-    all_posts.sort(key=lambda x: x["views"], reverse=True)
-    return all_posts[0] if all_posts else None
+        logger.error(f"Claude error: {e}")
+        return text
 
 # ── Отправка на одобрение ─────────────────────────────────────────────────────
 
-async def send_for_approval(app: Application, post_text: str, category: str, source_channel: str):
-    """Отправляет пост админу на одобрение"""
+async def send_for_approval(app: Application, post_text: str, category: str, source: str):
+    post_id = str(len(pending_posts))
+    pending_posts[post_id] = {
+        "text": post_text + CHANNEL_SIGNATURE,
+        "category": category,
+        "source": source,
+        "original": post_text
+    }
 
-    # Кнопки одобрения
+    emoji = {"crypto": "📈", "ai": "🤖", "forex": "💹"}.get(category, "📌")
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{len(pending_posts)}"),
-            InlineKeyboardButton("❌ Пропустить",   callback_data=f"reject_{len(pending_posts)}")
+            InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{post_id}"),
+            InlineKeyboardButton("❌ Пропустить",   callback_data=f"reject_{post_id}")
         ],
-        [
-            InlineKeyboardButton("✏️ Следующий вариант", callback_data=f"next_{len(pending_posts)}")
-        ]
+        [InlineKeyboardButton("🔄 Переписать заново", callback_data=f"next_{post_id}")]
     ])
 
-    category_emoji = {"crypto": "📈", "ai": "🤖", "forex": "💹"}
-    emoji = category_emoji.get(category, "📌")
+    preview = f"{emoji} *Новый пост [{category.upper()}]*\n📡 Источник: @{source}\n\n{'─'*20}\n{post_text[:600]}{'...' if len(post_text) > 600 else ''}\n{'─'*20}"
 
-    preview = f"""
-{emoji} **Новый пост [{category.upper()}]**
-📡 Источник: @{source_channel}
-
-─────────────────
-{post_text[:800]}{'...' if len(post_text) > 800 else ''}
-─────────────────
-
-Одобрить публикацию?
-    """.strip()
-
-    msg = await app.bot.send_message(
+    await app.bot.send_message(
         chat_id=ADMIN_TG_ID,
         text=preview,
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
 
-    # Сохраняем в ожидающие
-    post_id = str(len(pending_posts))
-    pending_posts[post_id] = {
-        "text": post_text + CHANNEL_SIGNATURE,
-        "category": category,
-        "source": source_channel,
-        "msg_id": msg.message_id
-    }
-
 # ── Обработчики кнопок ────────────────────────────────────────────────────────
 
 async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает нажатие кнопок одобрения/отклонения"""
     query = update.callback_query
     await query.answer()
 
-    action, post_id = query.data.rsplit("_", 1)
+    parts = query.data.rsplit("_", 1)
+    action, post_id = parts[0], parts[1]
     post = pending_posts.get(post_id)
 
     if not post:
-        await query.edit_message_text("⚠️ Пост не найден или уже обработан.")
+        await query.edit_message_text("⚠️ Пост не найден.")
         return
 
     if action == "approve":
-        # Публикуем в канал
         try:
             await context.bot.send_message(
                 chat_id=CHANNEL_ID,
@@ -232,27 +211,26 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True
             )
             await query.edit_message_text(f"✅ Опубликовано в {CHANNEL_ID}!")
-            logger.info(f"Post published to {CHANNEL_ID}")
         except Exception as e:
-            await query.edit_message_text(f"❌ Ошибка публикации: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+        pending_posts.pop(post_id, None)
 
     elif action == "reject":
-        await query.edit_message_text("❌ Пост пропущен.")
+        await query.edit_message_text("❌ Пропущено.")
+        pending_posts.pop(post_id, None)
 
     elif action == "next":
-        await query.edit_message_text("🔄 Генерирую новый вариант...")
-        # Перегенерируем пост
-        new_text = await rewrite_with_claude(post["text"], post["category"])
+        await query.edit_message_text("🔄 Переписываю...")
+        new_text = await rewrite_with_claude(post["original"], post["category"])
         pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
+        pending_posts[post_id]["original"] = new_text
 
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{post_id}"),
                 InlineKeyboardButton("❌ Пропустить",   callback_data=f"reject_{post_id}")
             ],
-            [
-                InlineKeyboardButton("✏️ Следующий вариант", callback_data=f"next_{post_id}")
-            ]
+            [InlineKeyboardButton("🔄 Переписать заново", callback_data=f"next_{post_id}")]
         ])
         await context.bot.send_message(
             chat_id=ADMIN_TG_ID,
@@ -260,65 +238,42 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
-    # Удаляем из ожидающих
-    if action in ("approve", "reject"):
-        pending_posts.pop(post_id, None)
-
 # ── Планировщик ───────────────────────────────────────────────────────────────
 
-async def scheduled_parse(app: Application, telethon_client: TelegramClient, category: str):
-    """Запускается по расписанию — парсит и отправляет на одобрение"""
-    logger.info(f"Scheduled parse: {category}")
-
-    post = await get_best_post(telethon_client, category)
+async def scheduled_task(app: Application, category: str):
+    logger.info(f"Running scheduled parse: {category}")
+    post = await get_best_post(category)
     if not post:
         logger.warning(f"No posts found for {category}")
         return
-
-    # Переписываем через Claude
     rewritten = await rewrite_with_claude(post["text"], category)
-
-    # Отправляем на одобрение
     await send_for_approval(app, rewritten, category, post["channel"])
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
 async def main():
-    # Telethon клиент для чтения каналов
-    telethon_client = TelegramClient("parser_session", TG_API_ID, TG_API_HASH)
-    await telethon_client.start(phone=TG_PHONE)
-    logger.info("Telethon client started")
-
-    # Telegram бот
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|reject|next)_"))
 
-    # Планировщик
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
-    for schedule in SCHEDULE_TIMES:
+    for s in SCHEDULE_TIMES:
         scheduler.add_job(
-            scheduled_parse,
-            "cron",
-            hour=schedule["hour"],
-            minute=schedule["minute"],
-            args=[app, telethon_client, schedule["category"]]
+            scheduled_task, "cron",
+            hour=s["hour"], minute=s["minute"],
+            args=[app, s["category"]]
         )
     scheduler.start()
-    logger.info("Scheduler started — posts at 9:00, 13:00, 17:00, 20:00 Kyiv time")
+    logger.info("Parser started! Schedule: 9:00, 13:00, 17:00, 20:00 Kyiv")
 
-    # Запускаем бота
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-
-    logger.info("Parser bot running!")
 
     try:
         await asyncio.Event().wait()
     finally:
         await app.updater.stop()
         await app.stop()
-        await telethon_client.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(main())
