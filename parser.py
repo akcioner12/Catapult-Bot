@@ -130,7 +130,7 @@ async def rewrite_with_claude(text: str, category: str) -> str:
                     "content-type": "application/json"
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-5",
                     "max_tokens": 1000,
                     "messages": [{"role": "user", "content": prompt}]
                 }
