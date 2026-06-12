@@ -91,7 +91,7 @@ async def get_best_post(category: str) -> dict | None:
     for channel in channels[:5]:
         posts = await fetch_channel_posts(channel)
         if posts:
-            return random.choice(posts)
+            return posts[-1]  # берём самый последний пост
         await asyncio.sleep(1)
     return None
 
