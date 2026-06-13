@@ -1,12 +1,16 @@
 """
-Автопарсер контента — отдельный бот @Parser_catapult_bot
-Читает каналы через t.me/s/, переписывает через Claude, отправляет на одобрение
+Автопарсер контента v2
+- Берёт 2 последних поста из КАЖДОГО канала категории
+- Не дублирует уже отправленные посты
+- Переписывает через Claude
+- Отправляет на одобрение по расписанию
 """
 
 import os
 import asyncio
 import logging
 import random
+import hashlib
 
 import httpx
 from bs4 import BeautifulSoup
@@ -18,11 +22,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
-PARSER_BOT_TOKEN = os.getenv("PARSER_BOT_TOKEN")  # @Parser_catapult_bot
+PARSER_BOT_TOKEN = os.getenv("PARSER_BOT_TOKEN")
 ADMIN_TG_ID      = int(os.getenv("ADMIN_TG_ID", "0"))
 CHANNEL_ID       = os.getenv("CHANNEL_ID", "@Crypto_AI_Forex")
 CLAUDE_API_KEY   = os.getenv("CLAUDE_API_KEY", "")
-MAIN_BOT_TOKEN   = os.getenv("BOT_TOKEN")  # для публикации в канал
+MAIN_BOT_TOKEN   = os.getenv("BOT_TOKEN")
 CLAUDE_API_URL   = "https://api.anthropic.com/v1/messages"
 
 # ── Каналы ────────────────────────────────────────────────────────────────────
@@ -52,6 +56,8 @@ SCHEDULE_TIMES = [
     {"hour": 17, "minute": 0,  "category": "crypto"},
 ]
 
+# Хранилище уже отправленных постов (хэши текстов)
+sent_hashes: set = set()
 pending_posts = {}
 
 CHANNEL_SIGNATURE = """
@@ -63,7 +69,12 @@ CHANNEL_SIGNATURE = """
 
 # ── Парсинг ───────────────────────────────────────────────────────────────────
 
-async def fetch_channel_posts(channel: str, limit: int = 10) -> list:
+def text_hash(text: str) -> str:
+    """Хэш текста для проверки дублей"""
+    return hashlib.md5(text[:200].encode()).hexdigest()
+
+async def fetch_channel_posts(channel: str, limit: int = 2) -> list:
+    """Берёт последние N постов из канала"""
     posts = []
     url = f"https://t.me/s/{channel}"
     try:
@@ -74,26 +85,38 @@ async def fetch_channel_posts(channel: str, limit: int = 10) -> list:
         ) as client:
             resp = await client.get(url)
             if resp.status_code != 200:
+                logger.warning(f"Cannot fetch {channel}: {resp.status_code}")
                 return []
+
             soup = BeautifulSoup(resp.text, "html.parser")
             messages = soup.find_all("div", class_="tgme_widget_message_text")
-            for msg in messages[-limit:]:
+
+            # Берём последние посты (конец списка — самые свежие)
+            fresh = [m for m in messages if len(m.get_text().strip()) > 80]
+            for msg in fresh[-limit:]:
                 text = msg.get_text(separator="\n").strip()
-                if len(text) > 100:
-                    posts.append({"text": text, "channel": channel})
+                h = text_hash(text)
+                if h not in sent_hashes:
+                    posts.append({"text": text, "channel": channel, "hash": h})
+
     except Exception as e:
         logger.warning(f"Error fetching {channel}: {e}")
     return posts
 
-async def get_best_post(category: str) -> dict | None:
+async def get_all_posts(category: str) -> list:
+    """Собирает по 2 свежих поста из КАЖДОГО канала категории"""
     channels = CHANNELS.get(category, [])
-    random.shuffle(channels)
-    for channel in channels[:5]:
-        posts = await fetch_channel_posts(channel)
+    all_posts = []
+
+    for channel in channels:
+        posts = await fetch_channel_posts(channel, limit=2)
         if posts:
-            return posts[-1]  # берём самый последний пост
-        await asyncio.sleep(1)
-    return None
+            all_posts.extend(posts)
+            logger.info(f"Got {len(posts)} posts from @{channel}")
+        await asyncio.sleep(0.5)  # небольшая пауза между запросами
+
+    logger.info(f"Total posts for {category}: {len(all_posts)}")
+    return all_posts
 
 # ── Claude API ────────────────────────────────────────────────────────────────
 
@@ -142,13 +165,17 @@ async def rewrite_with_claude(text: str, category: str) -> str:
 
 # ── Отправка на одобрение ─────────────────────────────────────────────────────
 
-async def send_for_approval(app: Application, post_text: str, category: str, source: str):
-    post_id = str(len(pending_posts))
+async def send_post_for_approval(app: Application, post: dict, category: str, index: int, total: int):
+    """Отправляет один пост на одобрение"""
+    post_id = f"{category}_{len(pending_posts)}"
+    rewritten = await rewrite_with_claude(post["text"], category)
+
     pending_posts[post_id] = {
-        "text": post_text + CHANNEL_SIGNATURE,
-        "original": post_text,
+        "text": rewritten + CHANNEL_SIGNATURE,
+        "original": post["text"],
         "category": category,
-        "source": source
+        "source": post["channel"],
+        "hash": post["hash"]
     }
 
     emoji = {"crypto": "📈", "ai": "🤖", "forex": "💹"}.get(category, "📌")
@@ -161,10 +188,10 @@ async def send_for_approval(app: Application, post_text: str, category: str, sou
     ])
 
     preview = (
-        f"{emoji} *Новый пост [{category.upper()}]*\n"
-        f"📡 Источник: @{source}\n\n"
+        f"{emoji} *Пост {index}/{total} [{category.upper()}]*\n"
+        f"📡 @{post['channel']}\n\n"
         f"{'─'*20}\n"
-        f"{post_text[:600]}{'...' if len(post_text) > 600 else ''}\n"
+        f"{rewritten[:600]}{'...' if len(rewritten) > 600 else ''}\n"
         f"{'─'*20}"
     )
 
@@ -174,13 +201,14 @@ async def send_for_approval(app: Application, post_text: str, category: str, sou
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
+    await asyncio.sleep(1)  # пауза между сообщениями
 
 # ── Обработчики кнопок ────────────────────────────────────────────────────────
 
 async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action, post_id = query.data.rsplit("_", 1)
+    action, post_id = query.data.split("_", 1)
     post = pending_posts.get(post_id)
 
     if not post:
@@ -189,7 +217,6 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "approve":
         try:
-            # Публикуем через основной бот
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
@@ -200,12 +227,16 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "disable_web_page_preview": True
                     }
                 )
+            # Добавляем хэш в отправленные чтобы не дублировать
+            sent_hashes.add(post["hash"])
             await query.edit_message_text(f"✅ Опубликовано в {CHANNEL_ID}!")
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
         pending_posts.pop(post_id, None)
 
     elif action == "reject":
+        # При отклонении тоже добавляем хэш чтобы не показывать снова
+        sent_hashes.add(post["hash"])
         await query.edit_message_text("❌ Пропущено.")
         pending_posts.pop(post_id, None)
 
@@ -213,7 +244,6 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔄 Переписываю...")
         new_text = await rewrite_with_claude(post["original"], post["category"])
         pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
-        pending_posts[post_id]["original"] = new_text
 
         keyboard = InlineKeyboardMarkup([
             [
@@ -232,12 +262,26 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scheduled_task(app: Application, category: str):
     logger.info(f"Scheduled parse: {category}")
-    post = await get_best_post(category)
-    if not post:
-        logger.warning(f"No posts for {category}")
+
+    posts = await get_all_posts(category)
+
+    if not posts:
+        logger.warning(f"No posts found for {category}")
+        await app.bot.send_message(
+            chat_id=ADMIN_TG_ID,
+            text=f"⚠️ Нет новых постов по теме {category.upper()}"
+        )
         return
-    rewritten = await rewrite_with_claude(post["text"], category)
-    await send_for_approval(app, rewritten, category, post["channel"])
+
+    await app.bot.send_message(
+        chat_id=ADMIN_TG_ID,
+        text=f"📬 Найдено *{len(posts)} постов* по теме *{category.upper()}*. Отправляю на одобрение...",
+        parse_mode="Markdown"
+    )
+
+    for i, post in enumerate(posts, 1):
+        await send_post_for_approval(app, post, category, i, len(posts))
+        await asyncio.sleep(2)
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
@@ -253,7 +297,7 @@ async def main():
             args=[app, s["category"]]
         )
     scheduler.start()
-    logger.info("Parser bot started! Posts at 9:00, 13:00, 17:00, 20:00 Kyiv")
+    logger.info("Parser v2 started! Posts at 9:00, 13:00, 17:00, 20:00 Kyiv")
 
     await app.initialize()
     await app.start()
