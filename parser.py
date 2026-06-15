@@ -212,7 +212,7 @@ async def generate_image(text: str, category: str) -> str | None:
 
     try:
         encoded_prompt = image_prompt.replace(" ", "%20")
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true"
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630"
 
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(url)
