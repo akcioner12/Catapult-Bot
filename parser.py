@@ -226,13 +226,19 @@ async def generate_image(text: str, category: str) -> str | None:
                     "prompt": image_prompt,
                     "n": 1,
                     "size": "1792x1024",
-                    "quality": "standard"
+                    "quality": "hd"
                 }
             )
             data = resp.json()
+            logger.info(f"DALL-E status: {resp.status_code}")
+            if resp.status_code != 200:
+                logger.error(f"DALL-E HTTP {resp.status_code}: {data}")
+                return None
             if "data" in data and len(data["data"]) > 0:
-                return data["data"][0]["url"]
-            logger.error(f"DALL-E response: {data}")
+                url = data["data"][0]["url"]
+                logger.info(f"DALL-E image generated: {url[:60]}...")
+                return url
+            logger.error(f"DALL-E unexpected response: {data}")
             return None
     except Exception as e:
         logger.error(f"DALL-E error: {e}")
