@@ -202,46 +202,28 @@ async def rewrite_with_claude(text: str, category: str) -> str:
 # ── DALL-E картинка ───────────────────────────────────────────────────────────
 
 async def generate_image(text: str, category: str) -> str | None:
-    """Генерирует картинку через DALL-E 3 и возвращает URL"""
-    if not OPENAI_API_KEY:
-        return None
-
+    """Генерирует картинку через Pollinations AI (бесплатно, без API ключа)"""
     prompts = {
-        "crypto": "Futuristic cryptocurrency Bitcoin trading chart dark background neon blue orange glow cinematic photorealistic",
-        "ai":     "Artificial intelligence neural network glowing circuits dark background purple cyan neon cinematic photorealistic",
-        "forex":  "Forex trading currency pairs bull market dark background green blue neon charts cinematic photorealistic"
+        "crypto": "Futuristic cryptocurrency Bitcoin trading chart dark background neon blue orange glow cinematic photorealistic 4k",
+        "ai":     "Artificial intelligence neural network glowing circuits dark background purple cyan neon cinematic photorealistic 4k",
+        "forex":  "Forex trading currency pairs bull market dark background green blue neon charts cinematic photorealistic 4k"
     }
     image_prompt = prompts.get(category, prompts["crypto"])
 
     try:
+        encoded_prompt = image_prompt.replace(" ", "%20")
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true"
+
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/images/generations",
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "dall-e-3",
-                    "prompt": image_prompt,
-                    "n": 1,
-                    "size": "1792x1024",
-                    "quality": "hd"
-                }
-            )
-            data = resp.json()
-            logger.info(f"DALL-E status: {resp.status_code}")
-            if resp.status_code != 200:
-                logger.error(f"DALL-E HTTP {resp.status_code}: {data}")
-                return None
-            if "data" in data and len(data["data"]) > 0:
-                url = data["data"][0]["url"]
-                logger.info(f"DALL-E image generated: {url[:60]}...")
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                logger.info(f"Pollinations image OK: {url[:80]}...")
                 return url
-            logger.error(f"DALL-E unexpected response: {data}")
-            return None
+            else:
+                logger.error(f"Pollinations error: {resp.status_code}")
+                return None
     except Exception as e:
-        logger.error(f"DALL-E error: {e}")
+        logger.error(f"Pollinations error: {e}")
         return None
 
 # ── Клавиатура ────────────────────────────────────────────────────────────────
