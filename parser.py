@@ -1,7 +1,7 @@
 """
-Автопарсер контента v4
-- Использует TGStat API для получения постов с просмотрами
-- Топ-5 постов по количеству просмотров
+Автопарсер контента v5
+- Комбинированный: TGStat API + t.me/s/ как fallback
+- Топ-5 по просмотрам (TGStat) или по длине (fallback)
 - Переписывает через Claude
 - Отправляет на одобрение
 """
@@ -12,7 +12,8 @@ import logging
 import hashlib
 
 import httpx
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from bs4 import BeautifulSoup
+from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -66,14 +67,17 @@ CHANNEL_SIGNATURE = """
 
 ▶️ [YouTube]() | 💬 [TG Chat]() | 🎵 [TikTok]() | 📷 [Instagram]() | 🤖 [TG Bot](https://t.me/catapulttrade_guide_bot) | 🐦 [Twitter]()"""
 
-# ── TGStat API ────────────────────────────────────────────────────────────────
+# ── Хэш ───────────────────────────────────────────────────────────────────────
 
 def make_hash(text: str) -> str:
     return hashlib.md5(text[:200].encode()).hexdigest()
 
-async def get_channel_posts_tgstat(channel: str) -> list:
-    """Получает последние посты канала через TGStat API с просмотрами"""
-    posts = []
+# ── TGStat API ────────────────────────────────────────────────────────────────
+
+async def get_posts_tgstat(channel: str) -> list:
+    """Получает посты через TGStat API"""
+    if not TGSTAT_TOKEN:
+        return []
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
@@ -86,46 +90,85 @@ async def get_channel_posts_tgstat(channel: str) -> list:
                 }
             )
             data = resp.json()
-
             if data.get("status") != "ok":
-                logger.warning(f"TGStat error for @{channel}: {data.get('error')}")
                 return []
-
             items = data.get("response", {}).get("items", [])
+            posts = []
             for item in items:
                 text = item.get("text", "").strip()
                 views = item.get("viewsCount", 0) or 0
                 if len(text) > 100:
                     h = make_hash(text)
                     if h not in sent_hashes:
-                        posts.append({
-                            "text": text,
-                            "channel": channel,
-                            "views": views,
-                            "hash": h
-                        })
-
+                        posts.append({"text": text, "channel": channel, "views": views, "hash": h, "source": "tgstat"})
+            return posts
     except Exception as e:
         logger.warning(f"TGStat error @{channel}: {e}")
+        return []
+
+# ── t.me/s/ fallback ──────────────────────────────────────────────────────────
+
+async def get_posts_web(channel: str) -> list:
+    """Получает посты через t.me/s/ как запасной вариант"""
+    posts = []
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=15
+        ) as client:
+            resp = await client.get(f"https://t.me/s/{channel}")
+            if resp.status_code != 200:
+                return []
+            soup = BeautifulSoup(resp.text, "html.parser")
+            msgs = soup.find_all("div", class_="tgme_widget_message_text")
+            fresh = [m.get_text(separator="\n").strip() for m in msgs if len(m.get_text().strip()) > 100]
+            for text in fresh[-3:]:
+                h = make_hash(text)
+                if h not in sent_hashes:
+                    posts.append({"text": text, "channel": channel, "views": 0, "hash": h, "source": "web"})
+    except Exception as e:
+        logger.warning(f"Web error @{channel}: {e}")
     return posts
 
+# ── Сбор топ постов ───────────────────────────────────────────────────────────
+
 async def collect_top_posts(category: str) -> list:
-    """Собирает посты из всех каналов и возвращает топ-5 по просмотрам"""
     channels = CHANNELS.get(category, [])
     all_posts = []
+    tgstat_count = 0
+    web_count = 0
 
     for channel in channels:
-        posts = await get_channel_posts_tgstat(channel)
-        all_posts.extend(posts)
-        logger.info(f"@{channel}: {len(posts)} posts")
+        # Сначала пробуем TGStat
+        posts = await get_posts_tgstat(channel)
+        if posts:
+            tgstat_count += len(posts)
+            all_posts.extend(posts)
+            logger.info(f"TGStat @{channel}: {len(posts)} posts")
+        else:
+            # Fallback на t.me/s/
+            posts = await get_posts_web(channel)
+            if posts:
+                web_count += len(posts)
+                all_posts.extend(posts)
+                logger.info(f"Web @{channel}: {len(posts)} posts")
+            else:
+                logger.warning(f"No posts @{channel}")
         await asyncio.sleep(0.5)
 
-    logger.info(f"Total for {category}: {len(all_posts)}")
+    logger.info(f"Total {category}: {len(all_posts)} (TGStat: {tgstat_count}, Web: {web_count})")
 
-    # Сортируем по просмотрам
-    all_posts.sort(key=lambda x: x["views"], reverse=True)
+    # Сортируем: с просмотрами вверху, остальные по длине
+    tgstat_posts = [p for p in all_posts if p["source"] == "tgstat"]
+    web_posts    = [p for p in all_posts if p["source"] == "web"]
 
-    return all_posts[:TOP_POSTS]
+    tgstat_posts.sort(key=lambda x: x["views"], reverse=True)
+    web_posts.sort(key=lambda x: len(x["text"]), reverse=True)
+
+    # Берём сначала из TGStat, потом добиваем из web
+    combined = tgstat_posts + web_posts
+    return combined[:TOP_POSTS]
 
 # ── Claude API ────────────────────────────────────────────────────────────────
 
@@ -198,9 +241,11 @@ async def send_for_approval(post: dict, category: str, idx: int, total: int):
 
     emoji = {"crypto": "📈", "ai": "🤖", "forex": "💹"}.get(category, "📌")
     views = post.get("views", 0)
+    views_str = f"👁 {views:,}" if views > 0 else "📡 web"
+
     preview = (
         f"{emoji} *Пост {idx}/{total} — {category.upper()}*\n"
-        f"📡 @{post['channel']} | 👁 {views:,} просмотров\n\n"
+        f"📡 @{post['channel']} | {views_str}\n\n"
         f"{'─'*20}\n"
         f"{rewritten[:500]}{'...' if len(rewritten) > 500 else ''}\n"
         f"{'─'*20}"
@@ -227,8 +272,6 @@ async def send_for_approval(post: dict, category: str, idx: int, total: int):
         )
         if r.status_code != 200:
             logger.error(f"Send error: {r.text}")
-        else:
-            logger.info(f"Sent post {idx}/{total} from @{post['channel']} ({views} views)")
 
 # ── Обработчики кнопок ────────────────────────────────────────────────────────
 
@@ -276,7 +319,6 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             new_text = await rewrite_with_claude(post["original"], post["category"])
             pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
-
             keyboard = {
                 "inline_keyboard": [[
                     {"text": "✅ Опубликовать", "callback_data": f"approve_{post_id}"},
@@ -308,7 +350,7 @@ async def scheduled_task(app: Application, category: str):
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"🔍 Собираю топ посты по *{category.upper()}* через TGStat...",
+                "text": f"🔍 Собираю топ посты по *{category.upper()}*...",
                 "parse_mode": "Markdown"
             }
         )
@@ -328,7 +370,7 @@ async def scheduled_task(app: Application, category: str):
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"📬 Топ *{len(posts)}* постов по *{category.upper()}* (сортировка по просмотрам). Отправляю...",
+                "text": f"📬 Топ *{len(posts)}* постов по *{category.upper()}*. Отправляю...",
                 "parse_mode": "Markdown"
             }
         )
@@ -354,7 +396,7 @@ async def main():
             args=[app, s["category"]]
         )
     scheduler.start()
-    logger.info("Parser v4 (TGStat) started! 9:00 / 13:00 / 17:00 / 20:00 Kyiv")
+    logger.info("Parser v5 started! 9:00 / 13:00 / 17:00 / 20:00 Kyiv")
 
     await app.initialize()
     await app.start()
