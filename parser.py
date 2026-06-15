@@ -202,19 +202,19 @@ async def rewrite_with_claude(text: str, category: str) -> str:
 # ── DALL-E картинка ───────────────────────────────────────────────────────────
 
 async def generate_image(text: str, category: str) -> str | None:
-    """Генерирует картинку через DALL-E и возвращает URL"""
+    """Генерирует картинку через DALL-E 3 и возвращает URL"""
     if not OPENAI_API_KEY:
         return None
 
     prompts = {
-        "crypto": "Futuristic cryptocurrency trading chart, Bitcoin and altcoins, dark background, neon blue and orange glow, cinematic 4K",
-        "ai":     "Futuristic artificial intelligence neural network, glowing circuits, dark background, purple and cyan neon, cinematic 4K",
-        "forex":  "Forex trading platform with currency pairs, bull and bear market, dark background, green and blue neon, cinematic 4K"
+        "crypto": "Futuristic cryptocurrency Bitcoin trading chart dark background neon blue orange glow cinematic photorealistic",
+        "ai":     "Artificial intelligence neural network glowing circuits dark background purple cyan neon cinematic photorealistic",
+        "forex":  "Forex trading currency pairs bull market dark background green blue neon charts cinematic photorealistic"
     }
     image_prompt = prompts.get(category, prompts["crypto"])
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/images/generations",
                 headers={
@@ -225,11 +225,15 @@ async def generate_image(text: str, category: str) -> str | None:
                     "model": "dall-e-3",
                     "prompt": image_prompt,
                     "n": 1,
-                    "size": "1792x1024"
+                    "size": "1792x1024",
+                    "quality": "standard"
                 }
             )
             data = resp.json()
-            return data["data"][0]["url"]
+            if "data" in data and len(data["data"]) > 0:
+                return data["data"][0]["url"]
+            logger.error(f"DALL-E response: {data}")
+            return None
     except Exception as e:
         logger.error(f"DALL-E error: {e}")
         return None
