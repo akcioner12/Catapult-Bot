@@ -119,6 +119,7 @@ sent_hashes: set = set()
 pending_posts: dict = {}      # посты ожидающие одобрения
 approved_queue: dict = {}     # одобренные посты в очереди на публикацию
 editing_post: dict = {}       # пост в режиме редактирования
+awaiting_photo: dict = {}     # ожидаем фото для поста
 catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 
@@ -455,9 +456,25 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "approve":
+        # Переносим в pending_approval — ждём фото
+        awaiting_photo[ADMIN_TG_ID] = post_id
+        pending_posts[post_id]["approved"] = True
+        await query.edit_message_text(
+            f"✅ <b>Пост одобрен!</b>\n\n"
+            f"📎 Прикрепи картинку к посту или нажми кнопку ниже.",
+            parse_mode="HTML",
+            reply_markup={
+                "inline_keyboard": [[
+                    {"text": "⏭ Пропустить картинку", "callback_data": f"skipphoto_{post_id}"}
+                ]]
+            }
+        )
+
+    elif action == "skipphoto":
+        awaiting_photo.pop(ADMIN_TG_ID, None)
         approved_queue[post["slot"]] = post
         await query.edit_message_text(
-            f"✅ <b>Одобрено!</b> Пост встал в очередь.\n"
+            f"✅ <b>Одобрено без картинки!</b> Пост встал в очередь.\n"
             f"Публикация: завтра по расписанию 🕐",
             parse_mode="HTML"
         )
@@ -509,6 +526,36 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
+# ── Обработчик фото ──────────────────────────────────────────────────────────
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_TG_ID:
+        return
+
+    post_id = awaiting_photo.get(user_id)
+    if not post_id:
+        return
+
+    post = pending_posts.get(post_id)
+    if not post:
+        awaiting_photo.pop(user_id, None)
+        return
+
+    # Сохраняем file_id фото
+    photo = update.message.photo[-1]  # берём максимальное разрешение
+    pending_posts[post_id]["photo_id"] = photo.file_id
+    awaiting_photo.pop(user_id, None)
+
+    # Одобряем пост с фото
+    approved_queue[post["slot"]] = pending_posts[post_id]
+    pending_posts.pop(post_id, None)
+
+    await update.message.reply_text(
+        "✅ <b>Картинка прикреплена! Пост встал в очередь.</b>\n"
+        "Публикация: завтра по расписанию 🕐",
+        parse_mode="HTML"
+    )
+
 # ── Обработчик редактирования ─────────────────────────────────────────────────
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -517,7 +564,8 @@ async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if update.message.text == "/cancel":
         editing_post.pop(user_id, None)
-        await update.message.reply_text("✅ Редактирование отменено.")
+        awaiting_photo.pop(user_id, None)
+        await update.message.reply_text("✅ Отменено.")
         return
 
     post_id = editing_post.get(user_id)
@@ -671,6 +719,16 @@ async def auto_publish(slot: str):
                         "is_anonymous": True,
                     }
                 )
+            elif post.get("photo_id"):
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "photo": post["photo_id"],
+                        "caption": post["text"],
+                        "parse_mode": "HTML",
+                    }
+                )
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
@@ -703,7 +761,8 @@ async def send_weekly_plan():
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
-    app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite)_"))
+    app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_TG_ID), handle_edit_message))
 
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
