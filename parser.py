@@ -123,7 +123,8 @@ awaiting_photo: dict = {}     # ожидаем фото для поста
 catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 
-PENDING_FILE = "/app/pending_posts.json"
+PENDING_FILE  = "/app/pending_posts.json"
+APPROVED_FILE = "/app/approved_queue.json"
 
 def save_pending():
     try:
@@ -132,15 +133,29 @@ def save_pending():
     except Exception as e:
         logger.error(f"Save pending error: {e}")
 
+def save_approved():
+    try:
+        with open(APPROVED_FILE, "w", encoding="utf-8") as f:
+            json.dump(approved_queue, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save approved error: {e}")
+
 def load_pending():
-    global pending_posts
+    global pending_posts, approved_queue
     try:
         if os.path.exists(PENDING_FILE):
             with open(PENDING_FILE, "r", encoding="utf-8") as f:
                 pending_posts = json.load(f)
-            logger.info(f"Загружено {len(pending_posts)} постов из файла")
+            logger.info(f"Загружено {len(pending_posts)} pending постов")
     except Exception as e:
         logger.error(f"Load pending error: {e}")
+    try:
+        if os.path.exists(APPROVED_FILE):
+            with open(APPROVED_FILE, "r", encoding="utf-8") as f:
+                approved_queue.update(json.load(f))
+            logger.info(f"Загружено {len(approved_queue)} approved постов")
+    except Exception as e:
+        logger.error(f"Load approved error: {e}")
 
 # ── Хэш ───────────────────────────────────────────────────────────────────────
 def make_hash(text: str) -> str:
@@ -584,6 +599,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "skipphoto":
         awaiting_photo.pop(ADMIN_TG_ID, None)
         approved_queue[post["slot"]] = post
+        save_approved()
         await query.edit_message_text(
             f"✅ <b>Одобрено без картинки!</b> Пост встал в очередь.\n"
             f"Публикация: завтра по расписанию 🕐",
@@ -675,6 +691,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Одобряем пост с фото
     approved_queue[post["slot"]] = pending_posts[post_id]
+    save_approved()
     pending_posts.pop(post_id, None)
 
     await update.message.reply_text(
@@ -867,6 +884,7 @@ async def auto_publish(slot: str):
                     }
                 )
         approved_queue.pop(slot, None)
+        save_approved()
         logger.info(f"✅ Опубликовано: {slot}")
     except Exception as e:
         logger.error(f"Ошибка публикации {slot}: {e}")
