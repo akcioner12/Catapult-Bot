@@ -123,6 +123,25 @@ awaiting_photo: dict = {}     # ожидаем фото для поста
 catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 
+PENDING_FILE = "/app/pending_posts.json"
+
+def save_pending():
+    try:
+        with open(PENDING_FILE, "w", encoding="utf-8") as f:
+            json.dump(pending_posts, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save pending error: {e}")
+
+def load_pending():
+    global pending_posts
+    try:
+        if os.path.exists(PENDING_FILE):
+            with open(PENDING_FILE, "r", encoding="utf-8") as f:
+                pending_posts = json.load(f)
+            logger.info(f"Загружено {len(pending_posts)} постов из файла")
+    except Exception as e:
+        logger.error(f"Load pending error: {e}")
+
 # ── Хэш ───────────────────────────────────────────────────────────────────────
 def make_hash(text: str) -> str:
     return hashlib.md5(text[:200].encode()).hexdigest()
@@ -491,6 +510,7 @@ async def send_for_approval(post_text: str, category: str, slot: str, source: st
         "source": source,
         "brief": brief,
     }
+    save_pending()
 
     emoji_map = {
         "crypto":   "🪙 КРИПТА",
@@ -570,27 +590,35 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         pending_posts.pop(post_id, None)
+        save_pending()
 
     elif action == "cancel":
         await query.edit_message_text("❌ Пост отменён.")
         pending_posts.pop(post_id, None)
+        save_pending()
 
     elif action == "edit":
-            editing_post[ADMIN_TG_ID] = post_id
-            await query.answer("✏️ Режим редактирования активен", show_alert=True)
-            async with httpx.AsyncClient(timeout=15) as client:
-                await client.post(
-                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                    json={
-                        "chat_id": ADMIN_TG_ID,
-                        "text": (
-                            f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
-                            f"{'─' * 28}\n\n"
-                            f"{post['text']}"
-                        ),
-                        "parse_mode": "HTML",
-                    }
-                )
+        editing_post[ADMIN_TG_ID] = post_id
+        # Меняем сообщение — показываем статус ожидания
+        await query.edit_message_text(
+            f"✏️ <b>Режим редактирования</b>\n"
+            f"Пришли исправленный текст. Для отмены: /cancel",
+            parse_mode="HTML"
+        )
+        # Отправляем полный текст отдельным сообщением для копирования
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": (
+                        f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
+                        f"{'─' * 28}\n\n"
+                        f"{post['text']}"
+                    ),
+                    "parse_mode": "HTML",
+                }
+            )
 
     elif action == "rewrite":
         await query.edit_message_text("🔄 Переписываю...")
@@ -886,6 +914,7 @@ async def main():
     logger.info("📊 Контент-план: воскресенье 19:00")
     logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
 
+    load_pending()
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
