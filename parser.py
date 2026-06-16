@@ -577,8 +577,12 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "edit":
         editing_post[ADMIN_TG_ID] = post_id
-        # Не трогаем оригинальное сообщение — просто подтверждаем
-        await query.answer("✏️ Режим редактирования активен", show_alert=False)
+        # Меняем сообщение — показываем статус ожидания
+        await query.edit_message_text(
+            f"✏️ <b>Режим редактирования</b>\n"
+            f"Пришли исправленный текст. Для отмены: /cancel",
+            parse_mode="HTML"
+        )
         # Отправляем полный текст отдельным сообщением для копирования
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
@@ -586,10 +590,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 json={
                     "chat_id": ADMIN_TG_ID,
                     "text": (
-                        f"✏️ <b>Режим редактирования</b>\n"
-                        f"{'─' * 28}\n"
-                        f"Скопируй текст ниже, внеси правки и пришли мне исправленную версию.\n"
-                        f"Для отмены: /cancel\n"
+                        f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
                         f"{'─' * 28}\n\n"
                         f"{post['text']}"
                     ),
