@@ -1,16 +1,20 @@
 """
-Автопарсер контента v6
-- Комбинированный: TGStat API + t.me/s/ как fallback
-- HTML форматирование (жирный, курсив, ссылки)
-- Кнопка Редактировать перед публикацией
-- Генерация картинки через DALL-E
-- Топ-5 по просмотрам
+Автопарсер контента v7
+- Ежевечерний сбор постов (20:00) для публикации на следующий день
+- 7 постов в день: Крипта, Catapult, ИИ, Catapult, Опрос, Форекс, Крипта
+- Одобрение через кнопки: ✅ Одобрить / ✏️ Редактировать / 🔄 Переписать / ❌ Отменить
+- После одобрения — автопубликация по расписанию
+- ТЗ для картинки к каждому посту
+- Воскресный контент-план в 19:00
 """
 
 import os
 import asyncio
 import logging
 import hashlib
+import json
+import random
+from datetime import datetime, timedelta
 
 import httpx
 from bs4 import BeautifulSoup
@@ -28,7 +32,6 @@ CHANNEL_ID       = os.getenv("CHANNEL_ID", "@Crypto_AI_Forex")
 CLAUDE_API_KEY   = os.getenv("CLAUDE_API_KEY", "")
 MAIN_BOT_TOKEN   = os.getenv("BOT_TOKEN")
 TGSTAT_TOKEN     = os.getenv("TGSTAT_TOKEN", "")
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY", "")
 CLAUDE_API_URL   = "https://api.anthropic.com/v1/messages"
 TGSTAT_API_URL   = "https://api.tgstat.ru"
 TOP_POSTS        = 5
@@ -36,47 +39,94 @@ TOP_POSTS        = 5
 # ── Каналы ────────────────────────────────────────────────────────────────────
 CHANNELS = {
     "crypto": [
-        "crypto_Iemon", "to_the_makemoney", "cryptocurrencyfore_dumbs",
-        "vs_cryptokings", "airolejon", "krisspump", "eeusd",
-        "if_crypto_ru", "cryptomedwed", "bitochekvko", "cryptanci",
-        "DeCenter", "cointelegraph"
+        "crypto_Iemon", "to_the_makemoney", "airolejon",
+        "eeusd", "if_crypto_ru", "cryptomedwed",
+        "cryptanci", "DeCenter", "cointelegraph"
     ],
     "ai": [
-        "web3nity_channel", "neurobussines", "naebnet",
-        "neyroseti_dr", "loading100ai"
+        "neurobussines", "naebnet", "neyroseti_dr", "loading100ai"
     ],
     "forex": [
-        "Delayprofit", "PROFiInvest", "tradeforexexchange",
-        "premiumgolubev", "markoptions", "newwavetrade",
-        "goldenonemoney", "uiartemzvezdin"
+        "PROFiInvest", "tradeforexexchange", "premiumgolubev",
+        "markoptions", "newwavetrade", "goldenonemoney", "uiartemzvezdin"
     ]
 }
 
-SCHEDULE_TIMES = [
-    {"hour": 6,  "minute": 0,  "category": "crypto"},
-    {"hour": 10, "minute": 0,  "category": "ai"},
-    {"hour": 14, "minute": 0,  "category": "forex"},
-    {"hour": 17, "minute": 0,  "category": "crypto"},
+# ── Расписание публикаций (следующий день) ────────────────────────────────────
+PUBLISH_SCHEDULE = [
+    {"hour": 9,  "minute": 0,  "slot": "crypto_1"},
+    {"hour": 11, "minute": 0,  "slot": "catapult_1"},
+    {"hour": 13, "minute": 0,  "slot": "ai"},
+    {"hour": 15, "minute": 0,  "slot": "catapult_2"},
+    {"hour": 16, "minute": 30, "slot": "poll"},
+    {"hour": 18, "minute": 0,  "slot": "forex"},
+    {"hour": 20, "minute": 0,  "slot": "crypto_2"},
 ]
 
-sent_hashes: set = set()
-pending_posts: dict = {}
-editing_post: dict = {}  # Хранит post_id для которого ждём редактирование
+# ── Углы для Catapult ─────────────────────────────────────────────────────────
+CATAPULT_ANGLES = [
+    "реферальная программа и заработок на команде",
+    "поинты и токены — выгода раннего входа",
+    "личный опыт — что я уже накопил и заработал",
+    "сравнение с другими платформами — почему Catapult лучше",
+    "инструкция как зарегистрироваться и начать",
+    "результаты команды — цифры и динамика",
+    "ответы на частые вопросы о проекте",
+]
 
+# ── Темы опросов ──────────────────────────────────────────────────────────────
+POLL_TOPICS = [
+    {
+        "question": "💰 Во что инвестируешь прямо сейчас?",
+        "options": ["BTC/ETH", "Альткоины", "Форекс", "Ничего, жду"]
+    },
+    {
+        "question": "📈 Какой твой горизонт инвестиций?",
+        "options": ["До 1 месяца", "1–6 месяцев", "1+ год", "Я спекулянт"]
+    },
+    {
+        "question": "🤖 Используешь ли AI в трейдинге?",
+        "options": ["Да, активно", "Иногда пробую", "Нет", "Хочу начать"]
+    },
+    {
+        "question": "🆘 Что мешает начать торговать?",
+        "options": ["Нет знаний", "Нет стартового капитала", "Боюсь рисков", "Уже торгую!"]
+    },
+    {
+        "question": "🏆 Какой рынок сейчас интереснее?",
+        "options": ["Крипта 🪙", "Форекс 💹", "Акции 📊", "Всё интересно"]
+    },
+    {
+        "question": "🎯 Торгуешь по стратегии или интуитивно?",
+        "options": ["Строго по стратегии", "В основном интуиция", "Микс", "Только учусь"]
+    },
+    {
+        "question": "⏰ Как часто проверяешь рынок?",
+        "options": ["Каждый час", "Раз в день", "Раз в неделю", "Постоянно слежу"]
+    },
+]
+
+# ── Подпись канала ────────────────────────────────────────────────────────────
 CHANNEL_SIGNATURE = """
 
 ———
-🔔 <a href="#">Подпишись на соцсети и не пропусти важное</a>
+🔔 Подпишись и не пропусти важное
 
-▶️ <a href="#">YouTube</a> | 💬 <a href="#">TG Chat</a> | 🎵 <a href="#">TikTok</a> | 📷 <a href="#">Instagram</a> | 🤖 <a href="https://t.me/catapulttrade_guide_bot">TG Bot</a> | 🐦 <a href="#">Twitter</a>"""
+▶️ <a href="#">YouTube</a> | 💬 <a href="https://t.me/Crypto_AI_Forex_Chat">TG Chat</a> | 🎵 <a href="#">TikTok</a> | 📷 <a href="#">Instagram</a> | 🤖 <a href="https://t.me/catapulttrade_guide_bot">TG Bot</a> | 🐦 <a href="#">Twitter</a>"""
+
+# ── Состояние ─────────────────────────────────────────────────────────────────
+sent_hashes: set = set()
+pending_posts: dict = {}      # посты ожидающие одобрения
+approved_queue: dict = {}     # одобренные посты в очереди на публикацию
+editing_post: dict = {}       # пост в режиме редактирования
+catapult_angle_idx: int = 0   # текущий угол Catapult
+poll_idx: int = 0             # текущий опрос
 
 # ── Хэш ───────────────────────────────────────────────────────────────────────
-
 def make_hash(text: str) -> str:
     return hashlib.md5(text[:200].encode()).hexdigest()
 
 # ── TGStat API ────────────────────────────────────────────────────────────────
-
 async def get_posts_tgstat(channel: str) -> list:
     if not TGSTAT_TOKEN:
         return []
@@ -133,48 +183,47 @@ async def get_posts_web(channel: str) -> list:
 async def collect_top_posts(category: str) -> list:
     channels = CHANNELS.get(category, [])
     all_posts = []
-
     for channel in channels:
         posts = await get_posts_tgstat(channel)
         if not posts:
             posts = await get_posts_web(channel)
         all_posts.extend(posts)
         await asyncio.sleep(0.5)
-
     tgstat_posts = sorted([p for p in all_posts if p["source"] == "tgstat"], key=lambda x: x["views"], reverse=True)
-    web_posts    = sorted([p for p in all_posts if p["source"] == "web"], key=lambda x: len(x["text"]), reverse=True)
-
+    web_posts    = [p for p in all_posts if p["source"] == "web"]
     return (tgstat_posts + web_posts)[:TOP_POSTS]
 
-# ── Claude API ────────────────────────────────────────────────────────────────
+# ── Claude API — генерация поста ──────────────────────────────────────────────
+STYLE_GUIDE = """Ты — автор Telegram канала «Крипта, AI, Forex. Как заработать?».
 
-async def rewrite_with_claude(text: str, category: str) -> str:
+Твой стиль:
+- Начинаешь с 👋 Друзья, ... или 👋 Друзья, всем привет! или 👋 Друзья, приветствую!
+- Каждый абзац начинается с тематического эмодзи
+- Пишешь от первого лица, живо и практично
+- Ключевые слова и цифры выделяешь <b>жирным</b>
+- Иногда используешь <i>курсив</i> для пояснений
+- Важные правила оформляешь через <blockquote>
+- 150-250 слов
+- В конце всегда призыв к действию
+- НЕ копируешь дословно — пересказываешь своими словами"""
+
+async def generate_post_claude(text: str, category: str) -> str:
     context = {
-        "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi",
-        "ai":     "искусственный интеллект, нейросети, AI инструменты",
-        "forex":  "Forex, валютные пары, трейдинг"
+        "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi, альткоины",
+        "ai":     "искусственный интеллект, нейросети, AI инструменты для заработка",
+        "forex":  "Forex, валютные пары, трейдинг, аналитика рынка"
     }
-    prompt = f"""Ты — автор Telegram канала о {context.get(category, 'финансах')}.
+    prompt = f"""{STYLE_GUIDE}
 
-Перепиши пост используя HTML форматирование для Telegram:
-- <b>жирный текст</b> для ключевых мыслей
-- <i>курсив</i> для второстепенного
-- <a href="url">ссылка</a> для ссылок
-- <blockquote>цитата</blockquote> для важных правил
+Тема: {context.get(category, 'финансы')}
 
-Правила написания:
-1. Начни с 👋 <b>Друзья,</b> ...
-2. Каждый абзац начинай с тематического эмодзи
-3. Ключевые факты и цифры — всегда <b>жирным</b>
-4. 150-250 слов
-5. В конце призыв: "Подробнее узнай в боте 👉 @catapulttrade_guide_bot"
-6. НЕ копируй дословно — перескажи своими словами
-7. Пиши живо, от первого лица
+На основе этой новости напиши пост для канала с HTML форматированием (теги: <b>, <i>, <blockquote>, <a href="">):
 
-Оригинал:
 {text[:1500]}
 
-Только готовый пост с HTML тегами, без пояснений."""
+В конце добавь: 👉 Подробнее в боте: @catapulttrade_guide_bot
+
+Только готовый пост, без пояснений."""
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -186,7 +235,7 @@ async def rewrite_with_claude(text: str, category: str) -> str:
                     "content-type": "application/json"
                 },
                 json={
-                    "model": "claude-sonnet-4-5",
+                    "model": "claude-sonnet-4-6",
                     "max_tokens": 1000,
                     "messages": [{"role": "user", "content": prompt}]
                 }
@@ -199,76 +248,184 @@ async def rewrite_with_claude(text: str, category: str) -> str:
         logger.error(f"Claude error: {e}")
         return text
 
-# ── DALL-E картинка ───────────────────────────────────────────────────────────
+# ── Claude API — пост о Catapult ──────────────────────────────────────────────
+async def generate_catapult_post(angle: str) -> str:
+    prompt = f"""{STYLE_GUIDE}
 
-async def generate_image(text: str, category: str) -> str | None:
-    """Генерирует картинку через Pollinations AI (бесплатно, без API ключа)"""
-    prompts = {
-        "crypto": "Futuristic cryptocurrency Bitcoin trading chart dark background neon blue orange glow cinematic photorealistic 4k",
-        "ai":     "Artificial intelligence neural network glowing circuits dark background purple cyan neon cinematic photorealistic 4k",
-        "forex":  "Forex trading currency pairs bull market dark background green blue neon charts cinematic photorealistic 4k"
-    }
-    image_prompt = prompts.get(category, prompts["crypto"])
+Напиши пост о торговой платформе Catapult Trade.
+
+Угол: {angle}
+
+Факты о Catapult Trade:
+- Торговая платформа где каждая сделка приносит поинты
+- Поинты конвертируются в токены платформы при листинге
+- Проект на ранней стадии — лучший момент для входа
+- Реферальная программа — % от активности команды
+- Бот с подробностями: @catapulttrade_guide_bot
+
+Напиши живой пост от первого лица с HTML форматированием.
+В конце: 🤖 Все подробности → @catapulttrade_guide_bot
+
+Только готовый пост, без пояснений."""
 
     try:
-        encoded_prompt = image_prompt.replace(" ", "%20")
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630"
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                logger.info(f"Pollinations image OK: {url[:80]}...")
-                return url
-            else:
-                logger.error(f"Pollinations error: {resp.status_code}")
-                return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 1000,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+            return "Пост о Catapult"
     except Exception as e:
-        logger.error(f"Pollinations error: {e}")
-        return None
+        logger.error(f"Claude Catapult error: {e}")
+        return "Пост о Catapult"
 
-# ── Клавиатура ────────────────────────────────────────────────────────────────
+# ── ТЗ для картинки ───────────────────────────────────────────────────────────
+async def generate_image_brief(post_text: str, category: str) -> str:
+    category_style = {
+        "crypto":   "тёмный фон, неоновые синие и оранжевые цвета, Bitcoin/крипто символика, торговые графики",
+        "ai":       "тёмный фон, фиолетовые и голубые цвета, нейронные сети, цифровые паттерны",
+        "forex":    "тёмный фон, зелёные и синие цвета, валютные пары, торговые графики",
+        "catapult": "тёмный фон, золотые и оранжевые цвета, ракета/запуск, трейдинг платформа",
+    }
+    style = category_style.get(category, category_style["crypto"])
+    prompt = f"""На основе этого поста составь короткое ТЗ для дизайнера/Midjourney на создание картинки.
 
+Пост:
+{post_text[:500]}
+
+Стиль: {style}, размер 1200x630px, кинематографично, фотореалистично.
+
+Напиши ТЗ в 2-3 предложения: что должно быть на картинке, цвета, настроение. Без лишних слов."""
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 200,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+    except Exception as e:
+        logger.error(f"Brief error: {e}")
+    return f"Фотореалистичная картинка на тему {category}, тёмный фон, неоновые цвета, 1200x630px."
+
+# ── Воскресный контент-план ───────────────────────────────────────────────────
+async def generate_weekly_plan() -> str:
+    prompt = f"""Составь контент-план на неделю для Telegram канала «Крипта, AI, Forex. Как заработать?».
+
+Расписание каждого дня:
+09:00 — Крипта
+11:00 — Catapult Trade
+13:00 — ИИ
+15:00 — Catapult Trade
+16:30 — Опрос
+18:00 — Форекс
+20:00 — Крипта
+
+Напиши план на 7 дней (Пн-Вс). Для каждого поста укажи конкретную тему/идею.
+Формат: день → время → тема одной строкой.
+Используй эмодзи. Без лишних слов."""
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 1500,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+    except Exception as e:
+        logger.error(f"Weekly plan error: {e}")
+    return "⚠️ Не удалось сгенерировать контент-план."
+
+# ── Клавиатура одобрения ──────────────────────────────────────────────────────
 def approval_keyboard(post_id: str) -> dict:
     return {
         "inline_keyboard": [[
-            {"text": "✅ Опубликовать", "callback_data": f"approve_{post_id}"},
-            {"text": "❌ Пропустить",   "callback_data": f"reject_{post_id}"}
+            {"text": "✅ Одобрить",      "callback_data": f"approve_{post_id}"},
+            {"text": "🔄 Переписать",    "callback_data": f"rewrite_{post_id}"},
         ], [
             {"text": "✏️ Редактировать", "callback_data": f"edit_{post_id}"},
-            {"text": "🔄 Переписать",    "callback_data": f"next_{post_id}"}
+            {"text": "❌ Отменить",      "callback_data": f"cancel_{post_id}"},
         ]]
     }
 
-# ── Отправка на одобрение ─────────────────────────────────────────────────────
+# ── Отправка поста на одобрение ───────────────────────────────────────────────
+async def send_for_approval(post_text: str, category: str, slot: str, source: str = "", original: str = ""):
+    global catapult_angle_idx, poll_idx
 
-async def send_for_approval(post: dict, category: str, idx: int, total: int):
-    post_id = f"{category}_{idx}_{len(pending_posts)}"
+    post_id = f"{slot}_{hashlib.md5(post_text[:50].encode()).hexdigest()[:8]}"
 
-    try:
-        rewritten = await rewrite_with_claude(post["text"], category)
-    except Exception as e:
-        logger.error(f"Rewrite failed: {e}")
-        rewritten = post["text"]
+    # Генерируем ТЗ для картинки
+    brief = await generate_image_brief(post_text, category)
 
     pending_posts[post_id] = {
-        "text": rewritten + CHANNEL_SIGNATURE,
-        "original": post["text"],
+        "text": post_text + CHANNEL_SIGNATURE,
+        "original": original or post_text,
         "category": category,
-        "source": post["channel"],
-        "hash": post["hash"],
-        "views": post.get("views", 0)
+        "slot": slot,
+        "source": source,
+        "brief": brief,
     }
 
-    emoji = {"crypto": "📈", "ai": "🤖", "forex": "💹"}.get(category, "📌")
-    views = post.get("views", 0)
-    views_str = f"👁 {views:,}" if views > 0 else "📡 web"
+    emoji_map = {
+        "crypto":   "🪙 КРИПТА",
+        "ai":       "🤖 ИИ",
+        "forex":    "💹 ФОРЕКС",
+        "catapult": "💰 CATAPULT TRADE",
+        "poll":     "📊 ОПРОС",
+    }
+    label = emoji_map.get(category, category.upper())
+
+    time_map = {
+        "crypto_1":   "09:00",
+        "catapult_1": "11:00",
+        "ai":         "13:00",
+        "catapult_2": "15:00",
+        "poll":       "16:30",
+        "forex":      "18:00",
+        "crypto_2":   "20:00",
+    }
+    pub_time = time_map.get(slot, "??:??")
 
     preview = (
-        f"{emoji} <b>Пост {idx}/{total} — {category.upper()}</b>\n"
-        f"📡 @{post['channel']} | {views_str}\n\n"
-        f"{'─'*20}\n"
-        f"{rewritten[:500]}{'...' if len(rewritten) > 500 else ''}\n"
-        f"{'─'*20}"
+        f"📌 <b>{label}</b> | публикация завтра в {pub_time}\n"
+        f"{'─' * 28}\n"
+        f"{post_text[:600]}{'...' if len(post_text) > 600 else ''}\n"
+        f"{'─' * 28}\n"
+        f"🖼 <b>ТЗ для картинки:</b>\n{brief}"
     )
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -283,12 +440,12 @@ async def send_for_approval(post: dict, category: str, idx: int, total: int):
         )
 
 # ── Обработчики кнопок ────────────────────────────────────────────────────────
-
 async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    parts = query.data.split("_", 1)
+    data = query.data
+    parts = data.split("_", 1)
     action = parts[0]
     post_id = parts[1]
     post = pending_posts.get(post_id)
@@ -298,70 +455,53 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "approve":
-        # Генерируем картинку если есть OpenAI ключ
-        image_url = await generate_image(post["text"], post["category"])
-
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                if image_url:
-                    # Публикуем с картинкой
-                    r = await client.post(
-                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
-                        json={
-                            "chat_id": CHANNEL_ID,
-                            "photo": image_url,
-                            "caption": post["text"],
-                            "parse_mode": "HTML"
-                        }
-                    )
-                else:
-                    # Публикуем без картинки
-                    r = await client.post(
-                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
-                        json={
-                            "chat_id": CHANNEL_ID,
-                            "text": post["text"],
-                            "parse_mode": "HTML",
-                            "disable_web_page_preview": True
-                        }
-                    )
-                if r.status_code == 200:
-                    sent_hashes.add(post["hash"])
-                    await query.edit_message_text("✅ Опубликовано!")
-                else:
-                    await query.edit_message_text(f"❌ Ошибка: {r.text[:200]}")
-        except Exception as e:
-            await query.edit_message_text(f"❌ Ошибка: {e}")
+        approved_queue[post["slot"]] = post
+        await query.edit_message_text(
+            f"✅ <b>Одобрено!</b> Пост встал в очередь.\n"
+            f"Публикация: завтра по расписанию 🕐",
+            parse_mode="HTML"
+        )
         pending_posts.pop(post_id, None)
 
-    elif action == "reject":
-        sent_hashes.add(post["hash"])
-        await query.edit_message_text("❌ Пропущено.")
+    elif action == "cancel":
+        await query.edit_message_text("❌ Пост отменён.")
         pending_posts.pop(post_id, None)
 
     elif action == "edit":
-        # Запоминаем что ждём редактирование для этого поста
         editing_post[ADMIN_TG_ID] = post_id
         await query.edit_message_text(
             f"✏️ <b>Режим редактирования</b>\n\n"
             f"Текущий текст:\n\n{post['text'][:800]}\n\n"
-            f"Пришли исправленный текст в ответном сообщении.\n"
-            f"Для отмены напиши /cancel",
+            f"Пришли исправленный текст ответным сообщением.\n"
+            f"Для отмены: /cancel",
             parse_mode="HTML"
         )
 
-    elif action == "next":
+    elif action == "rewrite":
         await query.edit_message_text("🔄 Переписываю...")
         try:
-            new_text = await rewrite_with_claude(post["original"], post["category"])
+            category = post["category"]
+            if category == "catapult":
+                new_text = await generate_catapult_post(random.choice(CATAPULT_ANGLES))
+            else:
+                new_text = await generate_post_claude(post["original"], category)
+
+            new_brief = await generate_image_brief(new_text, category)
             pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
+            pending_posts[post_id]["brief"] = new_brief
 
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                     json={
                         "chat_id": ADMIN_TG_ID,
-                        "text": f"🔄 <b>Новый вариант:</b>\n\n{new_text[:600]}",
+                        "text": (
+                            f"🔄 <b>Новый вариант:</b>\n"
+                            f"{'─' * 28}\n"
+                            f"{new_text[:600]}\n"
+                            f"{'─' * 28}\n"
+                            f"🖼 <b>ТЗ для картинки:</b>\n{new_brief}"
+                        ),
                         "parse_mode": "HTML",
                         "reply_markup": approval_keyboard(post_id)
                     }
@@ -370,15 +510,11 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
 # ── Обработчик редактирования ─────────────────────────────────────────────────
-
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получает отредактированный текст от пользователя"""
     user_id = update.effective_user.id
-
     if user_id != ADMIN_TG_ID:
         return
 
-    # Проверяем отмену
     if update.message.text == "/cancel":
         editing_post.pop(user_id, None)
         await update.message.reply_text("✅ Редактирование отменено.")
@@ -394,81 +530,203 @@ async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         editing_post.pop(user_id, None)
         return
 
-    # Обновляем текст
     new_text = update.message.text
     pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
     editing_post.pop(user_id, None)
 
-    # Показываем обновлённый вариант
     async with httpx.AsyncClient() as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"✅ <b>Текст обновлён!</b>\n\n{new_text[:600]}",
+                "text": (
+                    f"✅ <b>Текст обновлён!</b>\n\n"
+                    f"{new_text[:600]}\n\n"
+                    f"🖼 <b>ТЗ для картинки:</b>\n{post['brief']}"
+                ),
                 "parse_mode": "HTML",
                 "reply_markup": approval_keyboard(post_id)
             }
         )
 
-# ── Планировщик ───────────────────────────────────────────────────────────────
+# ── Вечерняя генерация (20:00) ────────────────────────────────────────────────
+async def evening_generation():
+    global catapult_angle_idx, poll_idx
+    logger.info("=== Вечерняя генерация постов ===")
 
-async def scheduled_task(app: Application, category: str):
-    logger.info(f"=== Scheduled: {category} ===")
-
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"🔍 Собираю топ посты по <b>{category.upper()}</b>...",
+                "text": "🌙 <b>Начинаю подготовку постов на завтра...</b>\n\nСобираю новости и генерирую контент.",
                 "parse_mode": "HTML"
             }
         )
 
-    posts = await collect_top_posts(category)
+    # 1. Крипта #1 (09:00)
+    posts = await collect_top_posts("crypto")
+    if posts:
+        text = await generate_post_claude(posts[0]["text"], "crypto")
+        await send_for_approval(text, "crypto", "crypto_1", posts[0]["channel"], posts[0]["text"])
+        await asyncio.sleep(2)
 
-    if not posts:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                json={"chat_id": ADMIN_TG_ID, "text": f"⚠️ Нет новых постов по {category.upper()}"}
-            )
+    # 2. Catapult #1 (11:00)
+    angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
+    catapult_angle_idx += 1
+    text = await generate_catapult_post(angle1)
+    await send_for_approval(text, "catapult", "catapult_1")
+    await asyncio.sleep(2)
+
+    # 3. ИИ (13:00)
+    posts = await collect_top_posts("ai")
+    if posts:
+        text = await generate_post_claude(posts[0]["text"], "ai")
+        await send_for_approval(text, "ai", "ai", posts[0]["channel"], posts[0]["text"])
+        await asyncio.sleep(2)
+
+    # 4. Catapult #2 (15:00)
+    angle2 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
+    catapult_angle_idx += 1
+    text = await generate_catapult_post(angle2)
+    await send_for_approval(text, "catapult", "catapult_2")
+    await asyncio.sleep(2)
+
+    # 5. Опрос (16:30)
+    poll = POLL_TOPICS[poll_idx % len(POLL_TOPICS)]
+    poll_idx += 1
+    poll_text = f"📊 <b>ОПРОС</b>\n\n{poll['question']}\n\n" + "\n".join([f"• {o}" for o in poll['options']])
+    poll_id = f"poll_{hashlib.md5(poll['question'].encode()).hexdigest()[:8]}"
+    pending_posts[poll_id] = {
+        "text": poll_text,
+        "original": poll_text,
+        "category": "poll",
+        "slot": "poll",
+        "source": "",
+        "brief": "Яркая карточка с вопросом, тёмный фон, неоновый текст, 1200x630px.",
+        "poll_data": poll,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": (
+                    f"📌 <b>📊 ОПРОС</b> | публикация завтра в 16:30\n"
+                    f"{'─' * 28}\n"
+                    f"{poll['question']}\n\n"
+                    f"Варианты: {' / '.join(poll['options'])}\n"
+                    f"{'─' * 28}\n"
+                    f"🖼 <b>ТЗ для картинки:</b>\nЯркая карточка с вопросом, тёмный фон, неоновый текст."
+                ),
+                "parse_mode": "HTML",
+                "reply_markup": approval_keyboard(poll_id)
+            }
+        )
+    await asyncio.sleep(2)
+
+    # 6. Форекс (18:00)
+    posts = await collect_top_posts("forex")
+    if posts:
+        text = await generate_post_claude(posts[0]["text"], "forex")
+        await send_for_approval(text, "forex", "forex", posts[0]["channel"], posts[0]["text"])
+        await asyncio.sleep(2)
+
+    # 7. Крипта #2 (20:00)
+    posts = await collect_top_posts("crypto")
+    if len(posts) > 1:
+        text = await generate_post_claude(posts[1]["text"], "crypto")
+        await send_for_approval(text, "crypto", "crypto_2", posts[1]["channel"], posts[1]["text"])
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": "✅ <b>Все посты готовы!</b>\n\nОдобри или отредактируй каждый — они опубликуются завтра автоматически по расписанию.",
+                "parse_mode": "HTML"
+            }
+        )
+
+# ── Автопубликация по расписанию ──────────────────────────────────────────────
+async def auto_publish(slot: str):
+    post = approved_queue.get(slot)
+    if not post:
+        logger.warning(f"Нет одобренного поста для слота {slot}")
         return
 
-    async with httpx.AsyncClient() as client:
+    logger.info(f"Публикую слот: {slot}")
+    category = post["category"]
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            if category == "poll" and "poll_data" in post:
+                poll_data = post["poll_data"]
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPoll",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "question": poll_data["question"],
+                        "options": poll_data["options"],
+                        "is_anonymous": True,
+                    }
+                )
+            else:
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "text": post["text"],
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True
+                    }
+                )
+        approved_queue.pop(slot, None)
+        logger.info(f"✅ Опубликовано: {slot}")
+    except Exception as e:
+        logger.error(f"Ошибка публикации {slot}: {e}")
+
+# ── Воскресный контент-план ───────────────────────────────────────────────────
+async def send_weekly_plan():
+    logger.info("=== Воскресный контент-план ===")
+    plan = await generate_weekly_plan()
+    async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"📬 Топ <b>{len(posts)}</b> постов по <b>{category.upper()}</b>. Отправляю...",
+                "text": f"📅 <b>КОНТЕНТ-ПЛАН НА НЕДЕЛЮ</b>\n\n{plan}",
                 "parse_mode": "HTML"
             }
         )
 
-    for i, post in enumerate(posts, 1):
-        try:
-            await send_for_approval(post, category, i, len(posts))
-            await asyncio.sleep(3)
-        except Exception as e:
-            logger.error(f"Error sending post {i}: {e}")
-
 # ── Запуск ────────────────────────────────────────────────────────────────────
-
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
-    app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|reject|edit|next)_"))
+    app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite)_"))
     app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_TG_ID), handle_edit_message))
 
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
-    for s in SCHEDULE_TIMES:
+
+    # Вечерняя генерация каждый день в 20:00
+    scheduler.add_job(evening_generation, "cron", hour=20, minute=0)
+
+    # Воскресный контент-план в 19:00
+    scheduler.add_job(send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0)
+
+    # Автопубликация по слотам
+    for s in PUBLISH_SCHEDULE:
         scheduler.add_job(
-            scheduled_task, "cron",
+            auto_publish, "cron",
             hour=s["hour"], minute=s["minute"],
-            args=[app, s["category"]]
+            args=[s["slot"]]
         )
+
     scheduler.start()
-    logger.info("Parser v6 started! 9:00 / 13:00 / 17:00 / 20:00 Kyiv")
+    logger.info("✅ Parser v7 запущен!")
+    logger.info("📅 Генерация: каждый день в 20:00")
+    logger.info("📊 Контент-план: воскресенье 19:00")
+    logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
 
     await app.initialize()
     await app.start()
