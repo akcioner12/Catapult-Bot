@@ -423,7 +423,7 @@ async def send_for_approval(post_text: str, category: str, slot: str, source: st
     preview = (
         f"📌 <b>{label}</b> | публикация завтра в {pub_time}\n"
         f"{'─' * 28}\n"
-        f"{post_text[:600]}{'...' if len(post_text) > 600 else ''}\n"
+        f"{post_text}\n"
         f"{'─' * 28}\n"
         f"🖼 <b>ТЗ для картинки:</b>\n{brief}"
     )
