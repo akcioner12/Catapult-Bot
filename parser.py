@@ -159,7 +159,31 @@ async def get_posts_tgstat(channel: str) -> list:
         logger.warning(f"TGStat error @{channel}: {e}")
         return []
 
-async def get_posts_web(channel: str) -> list:
+def parse_post_date(msg) -> datetime | None:
+    """Парсим дату поста из HTML"""
+    try:
+        time_tag = msg.find_parent("div", class_="tgme_widget_message").find("time")
+        if time_tag and time_tag.get("datetime"):
+            from datetime import timezone
+            dt = datetime.fromisoformat(time_tag["datetime"].replace("Z", "+00:00"))
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except Exception:
+        pass
+    return None
+
+def parse_post_views(msg) -> int:
+    """Парсим просмотры поста"""
+    try:
+        wrap = msg.find_parent("div", class_="tgme_widget_message")
+        views_tag = wrap.find("span", class_="tgme_widget_message_views")
+        if views_tag:
+            v = views_tag.get_text().strip().replace("K", "000").replace("M", "000000")
+            return int("".join(filter(str.isdigit, v)))
+    except Exception:
+        pass
+    return 0
+
+async def get_posts_web(channel: str, hours: int = 24) -> list:
     posts = []
     try:
         async with httpx.AsyncClient(
@@ -172,27 +196,69 @@ async def get_posts_web(channel: str) -> list:
                 return []
             soup = BeautifulSoup(resp.text, "html.parser")
             msgs = soup.find_all("div", class_="tgme_widget_message_text")
-            fresh = [m.get_text(separator="\n").strip() for m in msgs if len(m.get_text().strip()) > 100]
-            for text in fresh[-3:]:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+            for msg in msgs:
+                text = msg.get_text(separator="\n").strip()
+                if len(text) < 100:
+                    continue
                 h = make_hash(text)
-                if h not in sent_hashes:
-                    posts.append({"text": text, "channel": channel, "views": 0, "hash": h, "source": "web"})
+                if h in sent_hashes:
+                    continue
+                post_date = parse_post_date(msg)
+                # Если дата не распарсилась — берём пост (на всякий случай)
+                if post_date and post_date < cutoff:
+                    continue
+                views = parse_post_views(msg)
+                posts.append({
+                    "text": text,
+                    "channel": channel,
+                    "views": views,
+                    "hash": h,
+                    "source": "web",
+                    "date": post_date
+                })
     except Exception as e:
         logger.warning(f"Web error @{channel}: {e}")
     return posts
 
+def viral_score(post: dict) -> float:
+    """Скор вовлечённости с учётом свежести: просмотры / (часы + 1)"""
+    views = post.get("views", 0) or 0
+    post_date = post.get("date")
+    if post_date:
+        age_hours = max(0, (datetime.utcnow() - post_date).total_seconds() / 3600)
+    else:
+        age_hours = 12  # если дата неизвестна — считаем средний возраст
+    return views / (age_hours + 1)
+
 async def collect_top_posts(category: str) -> list:
     channels = CHANNELS.get(category, [])
     all_posts = []
+
     for channel in channels:
+        # Сначала пробуем TGStat
         posts = await get_posts_tgstat(channel)
         if not posts:
-            posts = await get_posts_web(channel)
+            # Парсим за 24 часа
+            posts = await get_posts_web(channel, hours=24)
+            # Если мало постов — расширяем до 48 часов
+            if len(posts) < 2:
+                posts = await get_posts_web(channel, hours=48)
         all_posts.extend(posts)
         await asyncio.sleep(0.5)
-    tgstat_posts = sorted([p for p in all_posts if p["source"] == "tgstat"], key=lambda x: x["views"], reverse=True)
-    web_posts    = [p for p in all_posts if p["source"] == "web"]
-    return (tgstat_posts + web_posts)[:TOP_POSTS]
+
+    # Сортируем по вирусному скору (просмотры / возраст)
+    all_posts.sort(key=viral_score, reverse=True)
+    combined = all_posts[:TOP_POSTS]
+
+    for p in combined:
+        score = viral_score(p)
+        age = round((datetime.utcnow() - p["date"]).total_seconds() / 3600, 1) if p.get("date") else "?"
+        logger.info(f"  [{category}] @{p['channel']} | 👁{p['views']} | ⏱{age}ч | скор={score:.1f}")
+
+    logger.info(f"[{category}] Итого: {len(combined)} постов (из {len(all_posts)})")
+    return combined
 
 # ── Claude API — генерация поста ──────────────────────────────────────────────
 STYLE_GUIDE = """Ты — автор Telegram канала «Крипта, AI, Forex. Как заработать?».
@@ -208,19 +274,39 @@ STYLE_GUIDE = """Ты — автор Telegram канала «Крипта, AI, F
 - В конце всегда призыв к действию
 - НЕ копируешь дословно — пересказываешь своими словами"""
 
-async def generate_post_claude(text: str, category: str) -> str:
+async def generate_post_claude(posts: list, category: str) -> str:
     context = {
         "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi, альткоины",
         "ai":     "искусственный интеллект, нейросети, AI инструменты для заработка",
         "forex":  "Forex, валютные пары, трейдинг, аналитика рынка"
     }
+
+    # Формируем дайджест из всех постов с метриками
+    news_digest = ""
+    for i, p in enumerate(posts, 1):
+        age = ""
+        if p.get("date"):
+            age_hours = round((datetime.utcnow() - p["date"]).total_seconds() / 3600, 1)
+            age = f"⏱{age_hours}ч назад"
+        score = round(viral_score(p), 1)
+        news_digest += (
+            f"\n--- Новость {i} (@{p['channel']} | 👁{p['views']} просмотров | {age} | скор вирусности={score}) ---\n"
+            f"{p['text'][:600]}\n"
+        )
+
     prompt = f"""{STYLE_GUIDE}
 
 Тема: {context.get(category, 'финансы')}
 
-На основе этой новости напиши пост для канала с HTML форматированием (теги: <b>, <i>, <blockquote>, <a href="">):
+Ниже {len(posts)} свежих постов за последние 24-48 часов из телеграм каналов по теме {category}.
+У каждого поста указаны: просмотры, возраст и скор вирусности (просмотры/часы — чем выше, тем горячее).
 
-{text[:1500]}
+Выбери САМУЮ горячую и резонансную тему — учитывай скор вирусности и свежесть.
+Свежий пост с высоким скором важнее старого с большими просмотрами.
+Напиши на её основе один пост для канала с HTML форматированием (теги: <b>, <i>, <blockquote>).
+НЕ копируй дословно — осмысли и перескажи своими словами.
+
+{news_digest}
 
 В конце добавь: 👉 Подробнее в боте: @catapulttrade_guide_bot
 
@@ -486,13 +572,25 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "edit":
         editing_post[ADMIN_TG_ID] = post_id
-        await query.edit_message_text(
-            f"✏️ <b>Режим редактирования</b>\n\n"
-            f"Текущий текст:\n\n{post['text'][:800]}\n\n"
-            f"Пришли исправленный текст ответным сообщением.\n"
-            f"Для отмены: /cancel",
-            parse_mode="HTML"
-        )
+        # Не трогаем оригинальное сообщение — просто подтверждаем
+        await query.answer("✏️ Режим редактирования активен", show_alert=False)
+        # Отправляем полный текст отдельным сообщением для копирования
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": (
+                        f"✏️ <b>Режим редактирования</b>\n"
+                        f"{'─' * 28}\n"
+                        f"Скопируй текст ниже, внеси правки и пришли мне исправленную версию.\n"
+                        f"Для отмены: /cancel\n"
+                        f"{'─' * 28}\n\n"
+                        f"{post['text']}"
+                    ),
+                    "parse_mode": "HTML",
+                }
+            )
 
     elif action == "rewrite":
         await query.edit_message_text("🔄 Переписываю...")
@@ -501,7 +599,8 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if category == "catapult":
                 new_text = await generate_catapult_post(random.choice(CATAPULT_ANGLES))
             else:
-                new_text = await generate_post_claude(post["original"], category)
+                # При переписывании используем оригинальный текст как единственный источник
+                new_text = await generate_post_claude([{"text": post["original"], "channel": "original", "views": 0}], category)
 
             new_brief = await generate_image_brief(new_text, category)
             pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
@@ -613,10 +712,10 @@ async def evening_generation():
         )
 
     # 1. Крипта #1 (09:00)
-    posts = await collect_top_posts("crypto")
-    if posts:
-        text = await generate_post_claude(posts[0]["text"], "crypto")
-        await send_for_approval(text, "crypto", "crypto_1", posts[0]["channel"], posts[0]["text"])
+    crypto_posts = await collect_top_posts("crypto")
+    if crypto_posts:
+        text = await generate_post_claude(crypto_posts, "crypto")
+        await send_for_approval(text, "crypto", "crypto_1", crypto_posts[0]["channel"], crypto_posts[0]["text"])
         await asyncio.sleep(2)
 
     # 2. Catapult #1 (11:00)
@@ -627,10 +726,10 @@ async def evening_generation():
     await asyncio.sleep(2)
 
     # 3. ИИ (13:00)
-    posts = await collect_top_posts("ai")
-    if posts:
-        text = await generate_post_claude(posts[0]["text"], "ai")
-        await send_for_approval(text, "ai", "ai", posts[0]["channel"], posts[0]["text"])
+    ai_posts = await collect_top_posts("ai")
+    if ai_posts:
+        text = await generate_post_claude(ai_posts, "ai")
+        await send_for_approval(text, "ai", "ai", ai_posts[0]["channel"], ai_posts[0]["text"])
         await asyncio.sleep(2)
 
     # 4. Catapult #2 (15:00)
@@ -674,17 +773,17 @@ async def evening_generation():
     await asyncio.sleep(2)
 
     # 6. Форекс (18:00)
-    posts = await collect_top_posts("forex")
-    if posts:
-        text = await generate_post_claude(posts[0]["text"], "forex")
-        await send_for_approval(text, "forex", "forex", posts[0]["channel"], posts[0]["text"])
+    forex_posts = await collect_top_posts("forex")
+    if forex_posts:
+        text = await generate_post_claude(forex_posts, "forex")
+        await send_for_approval(text, "forex", "forex", forex_posts[0]["channel"], forex_posts[0]["text"])
         await asyncio.sleep(2)
 
     # 7. Крипта #2 (20:00)
-    posts = await collect_top_posts("crypto")
-    if len(posts) > 1:
-        text = await generate_post_claude(posts[1]["text"], "crypto")
-        await send_for_approval(text, "crypto", "crypto_2", posts[1]["channel"], posts[1]["text"])
+    # Используем уже собранные крипто посты, просим Claude выбрать другую тему
+    if crypto_posts:
+        text = await generate_post_claude(crypto_posts, "crypto")
+        await send_for_approval(text, "crypto", "crypto_2", crypto_posts[0]["channel"], crypto_posts[0]["text"])
 
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
