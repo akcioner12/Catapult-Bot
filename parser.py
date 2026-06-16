@@ -900,12 +900,48 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     awaiting_photo.pop(user_id, None)
     await update.message.reply_text("✅ Отменено.")
 
+async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+
+    time_map = {
+        "crypto_1":   "09:00 🪙 Крипта #1",
+        "catapult_1": "11:00 💰 Catapult #1",
+        "ai":         "13:00 🤖 ИИ",
+        "catapult_2": "15:00 💰 Catapult #2",
+        "poll":       "16:30 📊 Опрос",
+        "forex":      "18:00 💹 Форекс",
+        "crypto_2":   "20:00 🪙 Крипта #2",
+    }
+
+    # Одобренные посты
+    if approved_queue:
+        text = "✅ <b>Одобрены и ждут публикации:</b>\n\n"
+        for slot, post in approved_queue.items():
+            label = time_map.get(slot, slot)
+            preview = post["text"][:100].replace("\n", " ")
+            photo = "📎" if post.get("photo_id") else "📝"
+            text += f"{photo} {label}\n<i>{preview}...</i>\n\n"
+    else:
+        text = "📭 <b>Очередь пуста</b> — нет одобренных постов.\n\n"
+
+    # Ожидают одобрения
+    if pending_posts:
+        text += f"⏳ <b>Ожидают твоего одобрения: {len(pending_posts)} постов</b>\n"
+        for post_id, post in pending_posts.items():
+            slot = post.get("slot", "?")
+            label = time_map.get(slot, slot)
+            text += f"• {label}\n"
+
+    await update.message.reply_text(text, parse_mode="HTML")
+
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
     app.add_handler(CommandHandler("generate", cmd_generate))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
