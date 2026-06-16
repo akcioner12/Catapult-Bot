@@ -885,12 +885,30 @@ async def send_weekly_plan():
             }
         )
 
+# ── Команды ──────────────────────────────────────────────────────────────────
+async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    await update.message.reply_text("🌙 Запускаю генерацию постов...")
+    await evening_generation()
+
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_TG_ID:
+        return
+    editing_post.pop(user_id, None)
+    awaiting_photo.pop(user_id, None)
+    await update.message.reply_text("✅ Отменено.")
+
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
+    from telegram.ext import CommandHandler
+    app.add_handler(CommandHandler("generate", cmd_generate))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_TG_ID), handle_edit_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
 
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
