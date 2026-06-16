@@ -576,27 +576,21 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_posts.pop(post_id, None)
 
     elif action == "edit":
-        editing_post[ADMIN_TG_ID] = post_id
-        # Меняем сообщение — показываем статус ожидания
-        await query.edit_message_text(
-            f"✏️ <b>Режим редактирования</b>\n"
-            f"Пришли исправленный текст. Для отмены: /cancel",
-            parse_mode="HTML"
-        )
-        # Отправляем полный текст отдельным сообщением для копирования
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                json={
-                    "chat_id": ADMIN_TG_ID,
-                    "text": (
-                        f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
-                        f"{'─' * 28}\n\n"
-                        f"{post['text']}"
-                    ),
-                    "parse_mode": "HTML",
-                }
-            )
+            editing_post[ADMIN_TG_ID] = post_id
+            await query.answer("✏️ Режим редактирования активен", show_alert=True)
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": ADMIN_TG_ID,
+                        "text": (
+                            f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
+                            f"{'─' * 28}\n\n"
+                            f"{post['text']}"
+                        ),
+                        "parse_mode": "HTML",
+                    }
+                )
 
     elif action == "rewrite":
         await query.edit_message_text("🔄 Переписываю...")
