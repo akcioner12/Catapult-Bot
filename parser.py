@@ -968,6 +968,20 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     awaiting_photo.pop(user_id, None)
     await update.message.reply_text("✅ Отменено.")
 
+async def cmd_test_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+
+    if not approved_queue:
+        await update.message.reply_text("📭 Очередь пуста — нечего публиковать.")
+        return
+
+    # Берём первый пост из очереди
+    slot = list(approved_queue.keys())[0]
+    await update.message.reply_text(f"🚀 Публикую тестово слот: <b>{slot}</b>", parse_mode="HTML")
+    await auto_publish(slot)
+    await update.message.reply_text(f"✅ Готово! Проверяй канал @Crypto_AI_Forex")
+
 async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
@@ -1010,6 +1024,7 @@ async def main():
     app.add_handler(CommandHandler("generate", cmd_generate))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("queue", cmd_queue))
+    app.add_handler(CommandHandler("test_publish", cmd_test_publish))
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
