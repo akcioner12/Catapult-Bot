@@ -125,6 +125,8 @@ poll_idx: int = 0             # текущий опрос
 
 PENDING_FILE  = "/app/pending_posts.json"
 APPROVED_FILE = "/app/approved_queue.json"
+PHOTOS_DIR    = "/app/photos"
+os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 def save_pending():
     try:
@@ -684,21 +686,50 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         awaiting_photo.pop(user_id, None)
         return
 
-    # Сохраняем file_id фото
-    photo = update.message.photo[-1]  # берём максимальное разрешение
-    pending_posts[post_id]["photo_id"] = photo.file_id
-    awaiting_photo.pop(user_id, None)
+    await update.message.reply_text("⏳ Скачиваю картинку на сервер...")
 
-    # Одобряем пост с фото
-    approved_queue[post["slot"]] = pending_posts[post_id]
-    save_approved()
-    pending_posts.pop(post_id, None)
+    try:
+        # Получаем file_id максимального разрешения
+        photo = update.message.photo[-1]
+        file_id = photo.file_id
 
-    await update.message.reply_text(
-        "✅ <b>Картинка прикреплена! Пост встал в очередь.</b>\n"
-        "Публикация: завтра по расписанию 🕐",
-        parse_mode="HTML"
-    )
+        # Получаем путь к файлу через Bot API
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/getFile",
+                params={"file_id": file_id}
+            )
+            file_data = resp.json()
+            file_path = file_data["result"]["file_path"]
+
+            # Скачиваем файл на сервер
+            file_resp = await client.get(
+                f"https://api.telegram.org/file/bot{PARSER_BOT_TOKEN}/{file_path}"
+            )
+
+            # Сохраняем на диск
+            local_path = f"{PHOTOS_DIR}/{post_id}.jpg"
+            with open(local_path, "wb") as f:
+                f.write(file_resp.content)
+
+        # Сохраняем путь к файлу (не file_id!)
+        pending_posts[post_id]["photo_path"] = local_path
+        awaiting_photo.pop(user_id, None)
+
+        # Одобряем пост
+        approved_queue[post["slot"]] = pending_posts[post_id]
+        save_approved()
+        pending_posts.pop(post_id, None)
+        save_pending()
+
+        await update.message.reply_text(
+            "✅ <b>Картинка сохранена на сервер! Пост встал в очередь.</b>\n"
+            "Публикация: завтра по расписанию 🕐",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Photo download error: {e}")
+        await update.message.reply_text(f"❌ Ошибка при сохранении картинки: {e}")
 
 # ── Обработчик редактирования ─────────────────────────────────────────────────
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -863,16 +894,35 @@ async def auto_publish(slot: str):
                         "is_anonymous": True,
                     }
                 )
-            elif post.get("photo_id"):
-                await client.post(
-                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
-                    json={
-                        "chat_id": CHANNEL_ID,
-                        "photo": post["photo_id"],
-                        "caption": post["text"],
-                        "parse_mode": "HTML",
-                    }
-                )
+            elif post.get("photo_path") and os.path.exists(post["photo_path"]):
+                # Загружаем файл с диска — не протухает!
+                with open(post["photo_path"], "rb") as photo_file:
+                    photo_resp = await client.post(
+                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
+                        data={
+                            "chat_id": CHANNEL_ID,
+                            "caption": post["text"],
+                            "parse_mode": "HTML",
+                        },
+                        files={"photo": ("photo.jpg", photo_file, "image/jpeg")}
+                    )
+                if photo_resp.status_code != 200:
+                    logger.warning(f"sendPhoto failed ({photo_resp.status_code}), публикую без картинки")
+                    await client.post(
+                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                        json={
+                            "chat_id": CHANNEL_ID,
+                            "text": post["text"],
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": True
+                        }
+                    )
+                else:
+                    # Удаляем файл после успешной публикации
+                    try:
+                        os.remove(post["photo_path"])
+                    except Exception:
+                        pass
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
@@ -938,7 +988,7 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for slot, post in approved_queue.items():
             label = time_map.get(slot, slot)
             preview = post["text"][:100].replace("\n", " ")
-            photo = "📎" if post.get("photo_id") else "📝"
+            photo = "📎" if (post.get("photo_path") or post.get("photo_id")) else "📝"
             text += f"{photo} {label}\n<i>{preview}...</i>\n\n"
     else:
         text = "📭 <b>Очередь пуста</b> — нет одобренных постов.\n\n"
