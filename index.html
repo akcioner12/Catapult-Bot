@@ -1017,18 +1017,18 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const API_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzb3VyY2UiOiJhcGktdG9rZW4iLCJqdGkiOiIxYmI3NGQ1MS1kYTFkLTRlNDItOWI2Yi0zOTE0YzUxNjQzNTAiLCJzdWIiOiIyNWIzMTIxZS1jMjdkLTQwNDUtYjU4MC1kMWE3MTY3OTE0MjgiLCJwZXJtaXNzaW9ucyI6WyJ0b2tlbnMuY3JlYXRlIiwidG9rZW5zLnJlYWQiLCJ0cmFkZXMub3BlbiIsInRyYWRlcy5jbG9zZSIsInRyYWRlcy5saW1pdHMiLCJiYWxhbmNlLnJlYWQiLCJ1c2VyLnJlYWQiLCJmaWxlcy53cml0ZSIsInN0cmVhbXMucG9zaXRpb25zIiwic3RyZWFtcy5wcmljZSIsImJvb3N0ZXJzLnJlYWQiLCJib29zdGVycy5idXkiLCJwb3NpdGlvbnMucmVhZCJdLCJpYXQiOjE3ODE3ODU1ODYsImV4cCI6MTg0NDg1NzU4NX0.JVkLQJavST7d0qWIdm0BzME_pT25BrwxTNYwO8Mh8JE';
-const API_URL = 'https://public-api.catapult.trade/graphql';
 const REF_LINK = 'https://catapult.trade/r/akcioner12';
 
-async function gql(query) {
-  const res = await fetch(API_URL, {
+// Определяем URL бэкенда динамически
+const BACKEND_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:8000'
+  : 'https://web-production-9851f.up.railway.app';
+
+async function gql(query, variables) {
+  const res = await fetch(`${BACKEND_URL}/api/catapult`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_TOKEN}`
-    },
-    body: JSON.stringify({ query })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables })
   });
   return await res.json();
 }
