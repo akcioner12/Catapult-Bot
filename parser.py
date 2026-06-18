@@ -895,21 +895,24 @@ async def auto_publish(slot: str):
                     }
                 )
             elif post.get("photo_path") and os.path.exists(post["photo_path"]):
-                # Загружаем файл с диска через requests-style multipart
-                photo_bytes = open(post["photo_path"], "rb").read()
-                photo_resp = await client.post(
-                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
-                    content=photo_bytes,
-                    params={
-                        "chat_id": CHANNEL_ID,
-                        "caption": post["text"][:1024],
-                        "parse_mode": "HTML",
-                    },
-                    headers={"Content-Type": "image/jpeg"},
-                )
-                logger.info(f"sendPhoto response: {photo_resp.status_code} {photo_resp.text[:200]}")
-                if photo_resp.status_code != 200:
-                    logger.warning(f"sendPhoto failed ({photo_resp.status_code}), публикую без картинки")
+                # Используем python-telegram-bot для отправки файла
+                from telegram import Bot, InputFile
+                main_bot = Bot(token=MAIN_BOT_TOKEN)
+                try:
+                    with open(post["photo_path"], "rb") as photo_file:
+                        await main_bot.send_photo(
+                            chat_id=CHANNEL_ID,
+                            photo=InputFile(photo_file),
+                            caption=post["text"][:1024],
+                            parse_mode="HTML",
+                        )
+                    logger.info(f"✅ Фото опубликовано через Bot API")
+                    try:
+                        os.remove(post["photo_path"])
+                    except Exception:
+                        pass
+                except Exception as photo_err:
+                    logger.warning(f"sendPhoto failed: {photo_err}, публикую без картинки")
                     await client.post(
                         f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
                         json={
@@ -919,11 +922,6 @@ async def auto_publish(slot: str):
                             "disable_web_page_preview": True
                         }
                     )
-                else:
-                    try:
-                        os.remove(post["photo_path"])
-                    except Exception:
-                        pass
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
