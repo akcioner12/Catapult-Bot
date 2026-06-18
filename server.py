@@ -8,6 +8,7 @@ import uuid
 import string
 import random
 import logging
+import httpx
 from datetime import datetime
 from typing import Optional
 
@@ -24,7 +25,7 @@ app = FastAPI(title="Catapult Trade Bot API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В проде ограничь своим доменом
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,7 +33,9 @@ app.add_middleware(
 DB_PATH          = os.getenv("DB_PATH", "catapult.db")
 WEBHOOK_SECRET   = os.getenv("WEBHOOK_SECRET", "change_this_secret")
 MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://your-miniapp.com")
-BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")  # внутренний адрес бота
+BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")
+CATAPULT_JWT     = os.getenv("CATAPULT_JWT", "")
+CATAPULT_API     = "https://public-api.catapult.trade/graphql"
 
 # ── База данных ───────────────────────────────────────────────────────────────
 
@@ -68,7 +71,6 @@ def init_db():
     conn.close()
 
 def generate_ref_code(name: str) -> str:
-    """Генерируем читаемый ref_code: NAME + 4 символа"""
     clean = "".join(c.upper() for c in name if c.isalpha())[:4].ljust(4, "X")
     suffix = "".join(random.choices(string.digits + string.ascii_uppercase, k=4))
     return f"{clean}{suffix}"
@@ -90,27 +92,58 @@ class UpdateUserRequest(BaseModel):
         extra = "allow"
 
 class CatapultWebhookPayload(BaseModel):
-    """
-    Структура вебхука от Catapult Trade.
-    Уточни поля под реальный формат их API.
-    """
-    event:       str           # "user.registered"
-    ref_code:    str           # реф. код твоей сети (чей Mini App открыл пользователь)
-    user_id:     str           # ID нового пользователя на платформе
+    event:       str
+    ref_code:    str
+    user_id:     str
     email:       Optional[str] = None
 
-# ── Эндпоинты — пользователи ──────────────────────────────────────────────────
+class GraphQLRequest(BaseModel):
+    query: str
+    variables: Optional[dict] = None
+
+# ── Запуск ────────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup():
     init_db()
     logger.info("DB initialized")
 
+# ── ПРОКСИ для Catapult GraphQL API ──────────────────────────────────────────
+
+@app.post("/api/catapult")
+async def catapult_proxy(payload: GraphQLRequest):
+    """
+    Прокси для запросов к Catapult Trade GraphQL API.
+    Mini App вызывает этот эндпоинт, сервер передаёт запрос к Catapult.
+    Решает проблему CORS в браузере.
+    """
+    if not CATAPULT_JWT:
+        raise HTTPException(500, "CATAPULT_JWT not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                CATAPULT_API,
+                json={
+                    "query": payload.query,
+                    "variables": payload.variables or {}
+                },
+                headers={
+                    "Authorization": f"Bearer {CATAPULT_JWT}",
+                    "Content-Type": "application/json"
+                }
+            )
+            return resp.json()
+    except Exception as e:
+        logger.error(f"Catapult proxy error: {e}")
+        raise HTTPException(502, f"Catapult API error: {str(e)}")
+
+# ── Эндпоинты — пользователи ──────────────────────────────────────────────────
+
 @app.post("/users", status_code=201)
 async def create_user(data: CreateUserRequest):
     conn = get_db()
     try:
-        # Уникальный ref_code
         for _ in range(10):
             ref_code = generate_ref_code(data.name)
             existing = conn.execute("SELECT id FROM users WHERE ref_code=?", (ref_code,)).fetchone()
@@ -134,7 +167,6 @@ async def create_user(data: CreateUserRequest):
         return dict(user)
 
     except sqlite3.IntegrityError:
-        # Пользователь уже существует — возвращаем существующего
         user = conn.execute(
             "SELECT * FROM users WHERE telegram_id=?", (data.telegram_id,)
         ).fetchone()
@@ -174,6 +206,12 @@ async def update_user(telegram_id: str, data: UpdateUserRequest):
         updates.append("catapult_ref=?")
         params.append(data.catapult_ref)
 
+    extra = data.model_extra or {}
+    for key, val in extra.items():
+        if key in ("catapult_username", "onboarded"):
+            updates.append(f"{key}=?")
+            params.append(val)
+
     if updates:
         params.append(telegram_id)
         conn.execute(
@@ -189,7 +227,6 @@ async def update_user(telegram_id: str, data: UpdateUserRequest):
 
 @app.get("/users/{ref_code}/referrals")
 async def get_referrals(ref_code: str):
-    """Список всех рефералов пользователя"""
     conn = get_db()
     rows = conn.execute(
         "SELECT telegram_id, name, username, ref_code, created_at FROM users WHERE inviter_ref=?",
@@ -198,7 +235,7 @@ async def get_referrals(ref_code: str):
     conn.close()
     return [dict(r) for r in rows]
 
-# ── Эндпоинт — вебхук от Catapult Trade ──────────────────────────────────────
+# ── Вебхук от Catapult Trade ──────────────────────────────────────────────────
 
 @app.post("/webhook/catapult")
 async def catapult_webhook(
@@ -206,12 +243,6 @@ async def catapult_webhook(
     request: Request,
     x_webhook_secret: str = Header(default="")
 ):
-    """
-    Catapult Trade вызывает этот endpoint при регистрации нового пользователя.
-    Настрой URL вебхука в личном кабинете Catapult Trade:
-      https://your-backend.com/webhook/catapult
-    """
-    # Верификация подлинности вебхука
     if x_webhook_secret != WEBHOOK_SECRET:
         raise HTTPException(403, "Invalid webhook secret")
 
@@ -221,8 +252,6 @@ async def catapult_webhook(
     logger.info(f"Webhook: new user via ref={payload.ref_code}")
 
     conn = get_db()
-
-    # Находим пригласителя по ref_code из вебхука
     inviter = conn.execute(
         "SELECT * FROM users WHERE ref_code=? OR catapult_ref=?",
         (payload.ref_code, payload.ref_code)
@@ -230,20 +259,13 @@ async def catapult_webhook(
 
     if not inviter:
         conn.close()
-        logger.warning(f"Inviter not found for ref_code={payload.ref_code}")
         return {"status": "inviter_not_found"}
 
-    # Отмечаем, что пользователь прошёл онбординг на Catapult
-    conn.execute(
-        "UPDATE users SET onboarded=1 WHERE id=?", (inviter["id"],)
-    )
+    conn.execute("UPDATE users SET onboarded=1 WHERE id=?", (inviter["id"],))
     conn.commit()
     conn.close()
 
-    # Отправляем онбординг-сообщение через бота
-    # (бот слушает внутренний API на порту 8001)
     try:
-        import httpx
         async with httpx.AsyncClient() as client:
             await client.post(f"{BOT_API_URL}/internal/onboard", json={
                 "telegram_id": inviter["telegram_id"],
@@ -253,16 +275,12 @@ async def catapult_webhook(
     except Exception as e:
         logger.error(f"Failed to notify bot: {e}")
 
-    return {"status": "ok", "inviter_ref_code": inviter["ref_code"]}
+    return {"status": "ok"}
 
-# ── Эндпоинт — Mini App данные ────────────────────────────────────────────────
+# ── Mini App данные ───────────────────────────────────────────────────────────
 
 @app.get("/miniapp-data/{ref_code}")
 async def miniapp_data(ref_code: str):
-    """
-    Mini App вызывает этот endpoint чтобы получить данные владельца.
-    Возвращает только публичные поля.
-    """
     conn = get_db()
     user = conn.execute(
         "SELECT name, username, ref_code, calendly_link FROM users WHERE ref_code=?",
@@ -274,8 +292,6 @@ async def miniapp_data(ref_code: str):
         raise HTTPException(404, "Not found")
 
     user = dict(user)
-
-    # Формируем ссылку для кнопки "Записаться"
     if user.get("calendly_link"):
         booking_url = user["calendly_link"]
     elif user.get("username"):
@@ -284,10 +300,10 @@ async def miniapp_data(ref_code: str):
         booking_url = None
 
     return {
-        "name":         user["name"],
-        "ref_code":     user["ref_code"],
-        "booking_url":  booking_url,
-        "miniapp_url":  f"{MINIAPP_URL}?ref={user['ref_code']}",
+        "name":              user["name"],
+        "ref_code":          user["ref_code"],
+        "booking_url":       booking_url,
+        "miniapp_url":       f"{MINIAPP_URL}?ref={user['ref_code']}",
         "catapult_ref_link": f"https://catapulttrade.io/register?ref={user['ref_code']}",
     }
 
