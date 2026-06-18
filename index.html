@@ -1137,12 +1137,12 @@ async function loadPositions() {
 async function loadTokens() {
   try {
     const data = await gql(`{
-      tokens(filter: { sortBy: PRICE_CHANGE_DESC }, limit: 5) {
+      tokens(input: { pagination: { limit: 5 } }) {
         items {
-          ticker
-          currentPriceUsdtDrops
-          priceChangePercent
-          sessionType
+          symbol
+          name
+          price
+          volumeUsdtDrops
         }
       }
     }`);
@@ -1158,19 +1158,19 @@ async function loadTokens() {
     }
 
     el.innerHTML = tokens.map(t => {
-      const change = parseFloat(t.priceChangePercent || 0);
-      const price = (parseInt(t.currentPriceUsdtDrops || 0) / 1_000_000).toFixed(4);
+      const price = parseFloat(t.price || 0).toFixed(4);
+      const vol = (parseInt(t.volumeUsdtDrops || 0) / 1_000_000).toFixed(0);
       return `
         <div class="token-row">
           <div class="token-left">
-            <div class="token-icon">${t.ticker?.slice(0,2) || '?'}</div>
+            <div class="token-icon">${t.symbol?.slice(0,2) || '?'}</div>
             <div>
-              <div class="token-name">${t.ticker}</div>
+              <div class="token-name">${t.symbol}</div>
               <div class="token-price">$${price}</div>
             </div>
           </div>
-          <div class="token-change ${change >= 0 ? 'up' : 'down'}">
-            ${change >= 0 ? '+' : ''}${change.toFixed(1)}%
+          <div class="token-change up">
+            Vol: $${vol}
           </div>
         </div>`;
     }).join('');
