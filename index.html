@@ -1036,32 +1036,49 @@ async function gql(query, variables) {
 // Load user data
 async function loadUserData() {
   try {
-    const data = await gql(`{
-      me {
-        id username email
-        globalScore
+    // Запрос профиля
+    const userData = await gql(`{
+      userMe {
+        id
+        profileName
         referralCode
-        balance { usd }
+        xUsername
       }
     }`);
 
-    if (data?.data?.me) {
-      const me = data.data.me;
-      const bal = parseFloat(me.balance?.usd || 0).toFixed(2);
-      const score = me.globalScore || 0;
+    // Запрос баланса
+    const balData = await gql(`{
+      userBalance {
+        balanceUsdtDrops
+        inPositionsBalanceUsdtDrops
+      }
+    }`);
+
+    const me = userData?.data?.userMe;
+    const bal = balData?.data?.userBalance;
+
+    if (me) {
       const ref = me.referralCode || 'akcioner12';
+      const name = me.profileName || me.xUsername || 'Трейдер';
 
-      document.getElementById('balanceVal').textContent = bal;
-      document.getElementById('userName').textContent = me.username || me.email || 'Трейдер';
-      document.getElementById('globalScore').textContent = `⭐ ${score} pts`;
-      document.getElementById('userScore').textContent = `⭐ ${score} pts`;
-
-      document.getElementById('statBalance').textContent = `$${bal}`;
-      document.getElementById('statScore').textContent = score;
+      document.getElementById('userName').textContent = name;
       document.getElementById('refCode').textContent = ref;
 
       const refLink = `https://catapult.trade/r/${ref}`;
       document.getElementById('refLinkText').textContent = refLink;
+    }
+
+    if (bal) {
+      // balanceUsdtDrops — в USDT drops (делим на 1_000_000 для USDT)
+      const free = (parseInt(bal.balanceUsdtDrops || 0) / 1_000_000).toFixed(2);
+      const inPos = (parseInt(bal.inPositionsBalanceUsdtDrops || 0) / 1_000_000).toFixed(2);
+      const total = (parseFloat(free) + parseFloat(inPos)).toFixed(2);
+
+      document.getElementById('balanceVal').textContent = total;
+      document.getElementById('statBalance').textContent = `$${total}`;
+      document.getElementById('userScore').textContent = `💵 $${free} free`;
+      document.getElementById('globalScore').textContent = `💵 $${free} free`;
+      document.getElementById('statScore').textContent = `$${inPos} in pos`;
     }
   } catch(e) {
     console.log('User data error:', e);
@@ -1072,38 +1089,44 @@ async function loadUserData() {
 async function loadPositions() {
   try {
     const data = await gql(`{
-      positions(status: OPEN) {
+      closedPositions(limit: 5) {
         items {
-          id side size entryPrice
-          token { symbol }
-          pnl { usd }
+          id
+          side
+          nominalUsdtDrops
+          pnlUsdtDrops
+          token { ticker }
         }
+        total
       }
     }`);
 
-    const positions = data?.data?.positions?.items || [];
+    const positions = data?.data?.closedPositions?.items || [];
+    const total = data?.data?.closedPositions?.total || 0;
     const el = document.getElementById('positionsList');
     const tradesEl = document.getElementById('statTrades');
+    tradesEl.textContent = total;
 
     if (positions.length === 0) {
-      el.innerHTML = '<span style="color:var(--muted)">Нет открытых позиций</span>';
-      tradesEl.textContent = '0';
+      el.innerHTML = '<span style="color:var(--muted)">Нет закрытых позиций</span>';
     } else {
-      tradesEl.textContent = positions.length;
-      el.innerHTML = positions.map(p => `
+      el.innerHTML = positions.map(p => {
+        const pnl = parseInt(p.pnlUsdtDrops || 0) / 1_000_000;
+        const size = parseInt(p.nominalUsdtDrops || 0) / 1_000_000;
+        return `
         <div class="token-row">
           <div class="token-left">
-            <div class="token-icon">${p.token?.symbol?.slice(0,2) || '?'}</div>
+            <div class="token-icon">${p.token?.ticker?.slice(0,2) || '?'}</div>
             <div>
-              <div class="token-name">${p.token?.symbol || '?'}</div>
-              <div class="token-price">${p.side} · $${parseFloat(p.size).toFixed(2)}</div>
+              <div class="token-name">${p.token?.ticker || '?'}</div>
+              <div class="token-price">${p.side} · $${size.toFixed(2)}</div>
             </div>
           </div>
-          <div class="token-change ${parseFloat(p.pnl?.usd) >= 0 ? 'up' : 'down'}">
-            ${parseFloat(p.pnl?.usd) >= 0 ? '+' : ''}$${parseFloat(p.pnl?.usd || 0).toFixed(2)}
+          <div class="token-change ${pnl >= 0 ? 'up' : 'down'}">
+            ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}
           </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     }
   } catch(e) {
     document.getElementById('positionsList').textContent = 'Нет данных';
@@ -1114,11 +1137,12 @@ async function loadPositions() {
 async function loadTokens() {
   try {
     const data = await gql(`{
-      tokens(sort: PRICE_CHANGE_24H_DESC, limit: 5) {
+      tokens(filter: { sortBy: PRICE_CHANGE_DESC }, limit: 5) {
         items {
-          symbol
-          price { usd }
-          priceChange { h24 }
+          ticker
+          currentPriceUsdtDrops
+          priceChangePercent
+          sessionType
         }
       }
     }`);
@@ -1134,22 +1158,21 @@ async function loadTokens() {
     }
 
     el.innerHTML = tokens.map(t => {
-      const change = parseFloat(t.priceChange?.h24 || 0);
-      const price = parseFloat(t.price?.usd || 0).toFixed(4);
+      const change = parseFloat(t.priceChangePercent || 0);
+      const price = (parseInt(t.currentPriceUsdtDrops || 0) / 1_000_000).toFixed(4);
       return `
         <div class="token-row">
           <div class="token-left">
-            <div class="token-icon">${t.symbol?.slice(0,2) || '?'}</div>
+            <div class="token-icon">${t.ticker?.slice(0,2) || '?'}</div>
             <div>
-              <div class="token-name">${t.symbol}</div>
+              <div class="token-name">${t.ticker}</div>
               <div class="token-price">$${price}</div>
             </div>
           </div>
           <div class="token-change ${change >= 0 ? 'up' : 'down'}">
             ${change >= 0 ? '+' : ''}${change.toFixed(1)}%
           </div>
-        </div>
-      `;
+        </div>`;
     }).join('');
   } catch(e) {
     document.getElementById('tokenList').innerHTML = '<p style="color:var(--muted);font-size:13px">Нет данных</p>';
