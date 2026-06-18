@@ -895,17 +895,19 @@ async def auto_publish(slot: str):
                     }
                 )
             elif post.get("photo_path") and os.path.exists(post["photo_path"]):
-                # Загружаем файл с диска — не протухает!
-                with open(post["photo_path"], "rb") as photo_file:
-                    photo_resp = await client.post(
-                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
-                        data={
-                            "chat_id": CHANNEL_ID,
-                            "caption": post["text"],
-                            "parse_mode": "HTML",
-                        },
-                        files={"photo": ("photo.jpg", photo_file, "image/jpeg")}
-                    )
+                # Загружаем файл с диска через requests-style multipart
+                photo_bytes = open(post["photo_path"], "rb").read()
+                photo_resp = await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPhoto",
+                    content=photo_bytes,
+                    params={
+                        "chat_id": CHANNEL_ID,
+                        "caption": post["text"][:1024],
+                        "parse_mode": "HTML",
+                    },
+                    headers={"Content-Type": "image/jpeg"},
+                )
+                logger.info(f"sendPhoto response: {photo_resp.status_code} {photo_resp.text[:200]}")
                 if photo_resp.status_code != 200:
                     logger.warning(f"sendPhoto failed ({photo_resp.status_code}), публикую без картинки")
                     await client.post(
@@ -918,7 +920,6 @@ async def auto_publish(slot: str):
                         }
                     )
                 else:
-                    # Удаляем файл после успешной публикации
                     try:
                         os.remove(post["photo_path"])
                     except Exception:
