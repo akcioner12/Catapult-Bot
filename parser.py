@@ -895,7 +895,7 @@ async def auto_publish(slot: str):
                     }
                 )
             elif post.get("photo_path") and os.path.exists(post["photo_path"]):
-                # Используем python-telegram-bot для отправки файла
+                # Сначала фото без текста, потом полный текст с футером
                 from telegram import Bot, InputFile
                 main_bot = Bot(token=MAIN_BOT_TOKEN)
                 try:
@@ -903,25 +903,24 @@ async def auto_publish(slot: str):
                         await main_bot.send_photo(
                             chat_id=CHANNEL_ID,
                             photo=InputFile(photo_file),
-                            caption=post["text"][:1024],
-                            parse_mode="HTML",
                         )
-                    logger.info(f"✅ Фото опубликовано через Bot API")
+                    logger.info(f"✅ Фото опубликовано")
                     try:
                         os.remove(post["photo_path"])
                     except Exception:
                         pass
                 except Exception as photo_err:
                     logger.warning(f"sendPhoto failed: {photo_err}, публикую без картинки")
-                    await client.post(
-                        f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
-                        json={
-                            "chat_id": CHANNEL_ID,
-                            "text": post["text"],
-                            "parse_mode": "HTML",
-                            "disable_web_page_preview": True
-                        }
-                    )
+                # Затем полный текст с футером отдельным сообщением
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "text": post["text"],
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True
+                    }
+                )
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
