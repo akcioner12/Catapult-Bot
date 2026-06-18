@@ -969,6 +969,18 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     awaiting_photo.pop(user_id, None)
     await update.message.reply_text("✅ Отменено.")
 
+async def cmd_test_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Генерирует один тестовый пост по крипте"""
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    await update.message.reply_text("🔄 Генерирую один тестовый пост...")
+    posts = await collect_top_posts("crypto")
+    if not posts:
+        await update.message.reply_text("❌ Нет свежих постов в каналах.")
+        return
+    text = await generate_post_claude(posts, "crypto")
+    await send_for_approval(text, "crypto", "crypto_1", posts[0]["channel"], posts[0]["text"])
+
 async def cmd_test_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
@@ -1026,6 +1038,7 @@ async def main():
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("test_publish", cmd_test_publish))
+    app.add_handler(CommandHandler("test_generate", cmd_test_generate))
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
