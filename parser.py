@@ -740,9 +740,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # Обычные пользователи — обрабатываем как возможный ввод API ключа Catapult
+    # Обычные пользователи — сначала проверяем не ждём ли мы API ключ,
+    # если нет — это сообщение для живого диалога-прогрева
     if user_id != ADMIN_TG_ID:
-        await handle_api_key_for_users(update, context)
+        if context.user_data.get('awaiting_api_key'):
+            await handle_api_key_for_users(update, context)
+        else:
+            await handle_warmup_message(update, context)
         return
 
     if update.message.text == "/cancel":
@@ -1036,32 +1040,273 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 # ════════════════════════════════════════════════════════════════════════════
-# ── CATAPULT CONNECT — флоу для обычных пользователей (Личный Кабинет) ──────
+# ── WARMUP DIALOG — живой прогрев пользователя через Claude ─────────────────
 # ════════════════════════════════════════════════════════════════════════════
+
+WARMUP_SYSTEM_PROMPT = """Ты — дружелюбный собеседник в Telegram-боте на тему крипты, трейдинга и AI-заработка.
+
+ТВОЯ ЗАДАЧА:
+Веди непринуждённый живой диалог с пользователем. Узнай:
+- Какой у него опыт в криптовалюте и трейдинге (новичок? давно торгует? что пробовал?)
+- Пробовал ли зарабатывать с помощью AI-инструментов
+- Что его сейчас интересует / какая цель (заработок, обучение, просто интерес)
+
+СТИЛЬ:
+- Пиши как живой человек, не как бот-анкета. Реагируй на то что говорит собеседник, шути, уточняй детали, проявляй искренний интерес.
+- Короткие сообщения (2-4 предложения), не лекции.
+- НЕ упоминай Catapult Trade и не давай никаких ссылок пока сам не решишь что собеседник "прогрет".
+- Один вопрос за раз, не вываливай сразу несколько.
+
+КОГДА ПОДВОДИТЬ К CATAPULT:
+Ты сам решаешь, когда у тебя достаточно информации о собеседнике (обычно после 3-6 его ответов) — когда понятен его опыт и есть точка зацепки (интерес к крипте/трейдингу/AI/доходу).
+Когда готов перейти — заверши свой ответ ТОЧНО этой строкой на новой строке (без кавычек, без изменений):
+[READY_FOR_QUIZ]
+
+Если собеседник явно не интересуется темой вообще (грубит, игнорирует, пишет что ему это не нужно) — всё равно прояви уважение, можно мягко закончить разговор без перехода к квизу.
+
+Всегда отвечай только текстом следующего сообщения от своего лица — без META-комментариев, без пояснений о своей стратегии."""
+
+WARMUP_TRANSITION_TEXT = (
+    "Слушай, судя по тому что ты рассказал — тебе может быть интересна одна штука, на которой я сам и моя команда сейчot зарабатываем. "
+    "Это торговая платформа Catapult Trade — там честная математика без манипуляций (Provably Fair), и каждая сделка приносит поинты для будущего аирдропа.\n\n"
+    "Прежде чем дать ссылку — отвечу на 3 коротких вопроса, чтобы понять подходит ли это тебе. Погнали?"
+)
+
+CATAPULT_QUIZ = [
+    {
+        "question": "1️⃣ Что для тебя привычнее — спекуляция на новостях или системный подход со стратегией?",
+        "options": ["Спекуляция на новостях", "Системный подход", "Пока не торговал вообще"],
+    },
+    {
+        "question": "2️⃣ Что важнее при выборе платформы для торговли?",
+        "options": ["Низкий депозит для входа", "Честность алгоритма (без манипуляций)", "Пассивный доход без усилий"],
+    },
+    {
+        "question": "3️⃣ Готов попробовать платформу с минимальным депозитом $2 и без KYC?",
+        "options": ["Да, готов попробовать", "Хочу сначала изучить детальнее", "Пока не готов"],
+    },
+]
+
+
+async def claude_warmup_reply(history: list) -> str:
+    """Отправляет историю диалога в Claude, получает следующую реплику."""
+    messages = [{"role": h["role"], "content": h["content"]} for h in history]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 400,
+                    "system": WARMUP_SYSTEM_PROMPT,
+                    "messages": messages
+                }
+            )
+            data = resp.json()
+            if "content" in data and data["content"]:
+                return data["content"][0]["text"]
+    except Exception as e:
+        logger.error(f"Warmup Claude error: {e}")
+    return "Расскажи чуть больше — интересно узнать про твой опыт!"
+
+
+async def get_dialog_state(telegram_id: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{BACKEND_URL}/dialog/{telegram_id}")
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        logger.error(f"get_dialog_state error: {e}")
+    return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+
+
+async def save_dialog_state(telegram_id: str, state: dict):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(f"{BACKEND_URL}/dialog/{telegram_id}", json=state)
+    except Exception as e:
+        logger.error(f"save_dialog_state error: {e}")
+
+
+async def send_quiz_question(chat_id: int, step: int):
+    """Отправляет вопрос викторины №step (0-indexed) с кнопками-вариантами."""
+    q = CATAPULT_QUIZ[step]
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": opt, "callback_data": f"quizans_{step}_{i}"}]
+            for i, opt in enumerate(q["options"])
+        ]
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": q["question"],
+                "reply_markup": keyboard
+            }
+        )
+
+
+async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Обрабатывает свободный текст от пользователя во время прогрева.
+    Вызывается из handle_edit_message для НЕ-админов, когда не ждём API ключ и не в квизе.
+    """
+    user_id = update.effective_user.id
+    tg_id = str(user_id)
+    user_text = update.message.text.strip()
+
+    state = await get_dialog_state(tg_id)
+
+    # Если уже прошёл квиз или сейчас в квизе — не реагируем здесь (квиз отвечает кнопками)
+    if state["stage"] in ("quiz", "done"):
+        return
+
+    state["history"].append({"role": "user", "content": user_text})
+
+    # Показываем "печатает..."
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    reply = await claude_warmup_reply(state["history"])
+
+    ready_for_quiz = "[READY_FOR_QUIZ]" in reply
+    clean_reply = reply.replace("[READY_FOR_QUIZ]", "").strip()
+
+    if clean_reply:
+        state["history"].append({"role": "assistant", "content": clean_reply})
+        await update.message.reply_text(clean_reply)
+
+    if ready_for_quiz:
+        state["stage"] = "quiz"
+        state["quiz_step"] = 0
+        state["quiz_answers"] = []
+        await save_dialog_state(tg_id, state)
+
+        await asyncio.sleep(1)
+        await update.message.reply_text(WARMUP_TRANSITION_TEXT)
+        await asyncio.sleep(1.5)
+        await send_quiz_question(update.effective_chat.id, 0)
+    else:
+        await save_dialog_state(tg_id, state)
+
+
+async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатия кнопки в викторине про Catapult."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    tg_id = str(user_id)
+
+    # callback_data формат: quizans_{step}_{option_index}
+    _, step_str, opt_str = query.data.split("_")
+    step = int(step_str)
+    opt_idx = int(opt_str)
+
+    state = await get_dialog_state(tg_id)
+    if state["stage"] != "quiz":
+        return  # неактуальный квиз (например, повторное нажатие старой кнопки)
+
+    chosen_text = CATAPULT_QUIZ[step]["options"][opt_idx]
+    state["quiz_answers"].append({"q": step, "answer": chosen_text})
+
+    await query.edit_message_text(f"{CATAPULT_QUIZ[step]['question']}\n\n✅ {chosen_text}")
+
+    next_step = step + 1
+    if next_step < len(CATAPULT_QUIZ):
+        state["quiz_step"] = next_step
+        await save_dialog_state(tg_id, state)
+        await asyncio.sleep(0.6)
+        await send_quiz_question(update.effective_chat.id, next_step)
+    else:
+        # Викторина завершена — выдаём ссылку на Mini App
+        state["stage"] = "done"
+        await save_dialog_state(tg_id, state)
+
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📱 Открыть приложение", "web_app": {"url": MINIAPP_URL}}],
+                [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
+            ]
+        }
+        await asyncio.sleep(0.6)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=(
+                "🎉 <b>Отлично, ты в деле!</b>\n\n"
+                "Вот приложение с полной статистикой платформы — котировки, топ токенов, объёмы торгов и заработок.\n\n"
+                "Когда зарегистрируешься — подключи аккаунт и увидишь свой личный кабинет прямо здесь."
+            ),
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+
+async def cmd_reset_dialog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """На случай если пользователь хочет начать прогрев заново"""
+    tg_id = str(update.effective_user.id)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.delete(f"{BACKEND_URL}/dialog/{tg_id}")
+    except Exception as e:
+        logger.error(f"reset dialog error: {e}")
+    await update.message.reply_text("🔄 Окей, начнём с начала! Расскажи — какой у тебя опыт в крипте и трейдинге?")
+    state = {"history": [{"role": "user", "content": "[начало диалога]"}], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+    # не сохраняем фейковое сообщение в историю Claude — просто инициализируем пусто
+    state["history"] = []
+    await save_dialog_state(tg_id, state)
+
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /start и /start connect (deep link из кнопки Mini App).
-    context.args == ['connect'] если пришли по ссылке ?start=connect
+    Обычный /start запускает живой диалог-прогрев через Claude.
+    /start connect — сразу переход к привязке API ключа (минуя прогрев).
     """
     args = context.args
+    user_id = update.effective_user.id
+    tg_id = str(user_id)
 
     if args and args[0] == "connect":
         await start_connect_flow(update, context)
         return
 
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "📱 Открыть приложение", "web_app": {"url": MINIAPP_URL}}],
-            [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
-        ]
-    }
-    await update.message.reply_text(
-        "👋 Привет! Это гайд-бот по Catapult Trade.\n\n"
-        "Открой приложение чтобы посмотреть статистику платформы, "
-        "или подключи свой аккаунт чтобы видеть личный баланс и позиции.",
-        reply_markup=keyboard
-    )
+    # Проверяем — может пользователь уже прошёл прогрев/квиз ранее
+    state = await get_dialog_state(tg_id)
+
+    if state["stage"] == "done":
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📱 Открыть приложение", "web_app": {"url": MINIAPP_URL}}],
+                [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
+            ]
+        }
+        await update.message.reply_text(
+            "👋 Привет снова! Вот твоё приложение:",
+            reply_markup=keyboard
+        )
+        return
+
+    if state["stage"] == "quiz":
+        await update.message.reply_text("👋 Продолжим викторину с того места, где остановились!")
+        await send_quiz_question(update.effective_chat.id, state["quiz_step"])
+        return
+
+    if state["history"]:
+        await update.message.reply_text("👋 Привет снова! Продолжим разговор?")
+        return
+
+    opening = "👋 Привет! Расскажи — у тебя есть опыт в крипте или трейдинге? Или вообще только начинаешь интересоваться этой темой?"
+    state["history"] = [{"role": "assistant", "content": opening}]
+    await save_dialog_state(tg_id, state)
+    await update.message.reply_text(opening)
 
 
 async def start_connect_flow(update_or_query, context: ContextTypes.DEFAULT_TYPE):
@@ -1277,6 +1522,8 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_connect_enter_key,    pattern="^connect_enter_key$"))
     app.add_handler(CallbackQueryHandler(handle_connect_retry,        pattern="^connect_retry$"))
     app.add_handler(CallbackQueryHandler(handle_connect_cancel,       pattern="^connect_cancel$"))
+    app.add_handler(CallbackQueryHandler(handle_quiz_answer,          pattern="^quizans_"))
+    app.add_handler(CommandHandler("reset", cmd_reset_dialog))
 
     # ── Текстовые сообщения: админ -> редактирование постов, остальные -> ввод API ключа ──
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_message))
