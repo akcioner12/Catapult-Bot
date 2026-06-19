@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 import httpx
 from bs4 import BeautifulSoup
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -40,6 +40,11 @@ TOP_POSTS        = 5
 BACKEND_URL      = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
 MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://akcioner12.github.io/Catapult-Trade/")
 CATAPULT_GRAPHQL = "https://public-api.catapult.trade/graphql"
+
+# ── Legacy bot.py config (восстановленный флоу квалификации) ─────────────────
+API_URL          = os.getenv("API_URL", BACKEND_URL)
+CATAPULT_JWT     = os.getenv("CATAPULT_JWT", "")
+CATAPULT_MY_REF  = os.getenv("CATAPULT_MY_REF", "")
 
 # ── Каналы ────────────────────────────────────────────────────────────────────
 CHANNELS = {
@@ -740,9 +745,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # Обычные пользователи — сначала проверяем не ждём ли мы API ключ,
-    # если нет — это сообщение для живого диалога-прогрева
+    # Обычные пользователи — порядок проверки:
+    # 1) legacy-флоу (ожидание username/calendly из восстановленного bot.py)
+    # 2) ожидание API ключа Catapult
+    # 3) живой диалог-прогрев (warmup)
     if user_id != ADMIN_TG_ID:
+        handled = await handle_legacy_text(update, context)
+        if handled:
+            return
         if context.user_data.get('awaiting_api_key'):
             await handle_api_key_for_users(update, context)
         else:
@@ -1264,21 +1274,331 @@ async def cmd_reset_dialog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save_dialog_state(tg_id, state)
 
 
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ── LEGACY FLOW (восстановлено из bot.py) — основной /start ────────────────
+# ════════════════════════════════════════════════════════════════════════════
+
+CHECK_REFERRAL_QUERY = """
+query CheckReferral($referralCode: String!) {
+  checkReferral(referralCode: $referralCode) {
+    isValid
+    referrer {
+      id
+      username
+    }
+  }
+}
+"""
+
+WELCOME_NEW = """👋 Привет, {name}!
+
+Я помогаю людям разобраться, как зарабатывать на Catapult Trade.
+
+Расскажи немного о себе — это поможет мне дать тебе актуальную информацию.
+
+💬 Есть ли у тебя опыт в торговле криптовалютой?"""
+
+QUALIFY_Q2 = """Понял! А что для тебя сейчас важнее:
+
+• Быстро заработать на разнице курсов
+• Стабильный пассивный доход
+• Участвовать в росте нового проекта с нуля"""
+
+QUALIFY_Q3 = """Отлично. Последний вопрос — сколько времени в день ты готов уделять торговле?
+
+• До 30 минут
+• 1–2 часа
+• Хочу автоматизировать, тратить минимум времени"""
+
+READY_PITCH = """🚀 Есть кое-что интересное для тебя.
+
+Catapult Trade — платформа, где ты торгуешь и зарабатываешь поинты, которые потом конвертируются в токены.
+
+Токены выйдут на листинг — ранние участники получат максимальную долю.
+
+👇 Посмотри подробности и зарегистрируйся по реф. ссылке:"""
+
+ASK_USERNAME = """✅ Отлично! Как только зарегистрируешься на Catapult Trade — напиши мне свой username с платформы, и я создам твой персональный Mini App.
+
+📝 Напиши свой username на Catapult Trade (например: @ivan_trader)"""
+
+VERIFY_WAIT = """🔍 Проверяю регистрацию на Catapult Trade..."""
+
+VERIFY_SUCCESS = """🎉 Подтверждено! Ты в системе, {name}.
+
+Твой персональный Mini App создан — теперь ты можешь делиться им и зарабатывать на активности своих рефералов.
+
+Последний шаг — пришли ссылку на своё расписание (Calendly, Cal.com или любую другую), чтобы люди могли записываться к тебе на созвон.
+
+Если ещё нет — напиши /skip, пока используем твой Telegram."""
+
+VERIFY_FAIL = """❌ Не могу найти username @{username} среди рефералов.
+
+Убедись что:
+• Ты зарегистрировался именно по реф. ссылке из этого бота
+• Username написан правильно (можно без @)
+
+Попробуй ещё раз или напиши /skip если хочешь пропустить проверку."""
+
+CALENDLY_SAVED = """✅ Готово! Кнопка «Записаться на созвон» в твоём Mini App теперь ведёт на твоё расписание.
+
+Твой Mini App: {miniapp_url}
+
+Делись им и зарабатывай 💰"""
+
+CALENDLY_SKIPPED = """Окей! Пока кнопка «Записаться» будет вести в твой Telegram.
+
+Твой Mini App: {miniapp_url}
+
+Когда добавишь Calendly — просто пришли ссылку сюда."""
+
+
+async def check_referral_on_catapult(username: str) -> bool:
+    if not CATAPULT_JWT:
+        logger.warning("CATAPULT_JWT не задан — пропускаем верификацию")
+        return True
+
+    clean = username.lstrip("@").strip()
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                CATAPULT_GRAPHQL,
+                json={"query": CHECK_REFERRAL_QUERY, "variables": {"referralCode": clean}},
+                headers={"Authorization": f"Bearer {CATAPULT_JWT}", "Content-Type": "application/json"},
+                timeout=10
+            )
+            data = resp.json()
+            logger.info(f"checkReferral response: {data}")
+            result = data.get("data", {}).get("checkReferral", {})
+            return result.get("isValid", False)
+    except Exception as e:
+        logger.error(f"Catapult API error: {e}")
+        return False
+
+
+async def api_get_user(ref_or_tg_id: str) -> dict | None:
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{API_URL}/users/{ref_or_tg_id}", timeout=5)
+            return r.json() if r.status_code == 200 else None
+    except Exception as e:
+        logger.error(f"api_get_user: {e}")
+        return None
+
+async def api_create_user(data: dict) -> dict | None:
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(f"{API_URL}/users", json=data, timeout=5)
+            return r.json() if r.status_code in (200, 201) else None
+    except Exception as e:
+        logger.error(f"api_create_user: {e}")
+        return None
+
+async def api_update_user(telegram_id: int, data: dict) -> bool:
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.patch(f"{API_URL}/users/by-telegram/{telegram_id}", json=data, timeout=5)
+            return r.status_code == 200
+    except Exception as e:
+        logger.error(f"api_update_user: {e}")
+        return False
+
+
+def miniapp_keyboard(ref_code: str) -> InlineKeyboardMarkup:
+    url = f"{MINIAPP_URL}?ref={ref_code}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📲 Открыть приложение", web_app=WebAppInfo(url=url))
+    ]])
+
+def qualify_kb_1() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Да, есть опыт",      callback_data="exp_yes")],
+        [InlineKeyboardButton("📖 Немного, изучаю",    callback_data="exp_some")],
+        [InlineKeyboardButton("🔰 Нет, новичок",       callback_data="exp_no")],
+    ])
+
+def qualify_kb_2() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Быстрый заработок",  callback_data="goal_fast")],
+        [InlineKeyboardButton("💎 Пассивный доход",    callback_data="goal_passive")],
+        [InlineKeyboardButton("🚀 Ранний участник",    callback_data="goal_early")],
+    ])
+
+def qualify_kb_3() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏱ До 30 минут",        callback_data="time_low")],
+        [InlineKeyboardButton("🕐 1–2 часа",           callback_data="time_mid")],
+        [InlineKeyboardButton("🤖 Автоматизация",      callback_data="time_auto")],
+    ])
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /start и /start connect (deep link из кнопки Mini App).
-    Обычный /start запускает живой диалог-прогрев через Claude.
-    /start connect — сразу переход к привязке API ключа (минуя прогрев).
-    """
+    """Основной /start — восстановленный рабочий флоу квалификации (bot.py)."""
+    user = update.effective_user
     args = context.args
-    user_id = update.effective_user.id
-    tg_id = str(user_id)
 
     if args and args[0] == "connect":
         await start_connect_flow(update, context)
         return
 
-    # Проверяем — может пользователь уже прошёл прогрев/квиз ранее
+    inviter_ref = args[0] if args else None
+    context.user_data["inviter_ref"] = inviter_ref
+    context.user_data["state"] = "qualify_1"
+
+    existing = await api_get_user(str(user.id))
+    if existing:
+        await update.message.reply_text(
+            f"С возвращением, {user.first_name}! Вот твой Mini App:",
+            reply_markup=miniapp_keyboard(existing["ref_code"])
+        )
+        return
+
+    await update.message.reply_text(
+        WELCOME_NEW.format(name=user.first_name),
+        reply_markup=qualify_kb_1()
+    )
+
+
+async def qualify_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("exp_"):
+        context.user_data["exp"] = data
+        await query.edit_message_text(QUALIFY_Q2, reply_markup=qualify_kb_2())
+
+    elif data.startswith("goal_"):
+        context.user_data["goal"] = data
+        await query.edit_message_text(QUALIFY_Q3, reply_markup=qualify_kb_3())
+
+    elif data.startswith("time_"):
+        context.user_data["time"] = data
+        context.user_data["state"] = "show_miniapp"
+        user = update.effective_user
+        inviter_ref = context.user_data.get("inviter_ref") or CATAPULT_MY_REF
+
+        await api_create_user({
+            "telegram_id": str(user.id),
+            "username": user.username or "",
+            "name": user.first_name,
+            "inviter_ref": inviter_ref,
+            "qualify_data": {
+                "exp":  context.user_data.get("exp"),
+                "goal": context.user_data.get("goal"),
+                "time": context.user_data.get("time"),
+            }
+        })
+
+        user_data = await api_get_user(str(user.id))
+        ref_code = user_data["ref_code"] if user_data else str(user.id)
+
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📲 Открыть приложение", web_app=WebAppInfo(url=f"{MINIAPP_URL}?ref={ref_code}"))],
+            [InlineKeyboardButton("✅ Я зарегистрировался на Catapult!", callback_data="i_registered")]
+        ])
+        await query.edit_message_text(READY_PITCH, reply_markup=kb)
+
+
+async def i_registered_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["state"] = "awaiting_username"
+    await query.edit_message_text(ASK_USERNAME)
+
+
+async def handle_legacy_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Обрабатывает текстовые сообщения для legacy-флоу (username верификация, Calendly).
+    Возвращает True если сообщение было обработано здесь, False если нужно передать дальше.
+    """
+    text = update.message.text.strip()
+    state = context.user_data.get("state", "")
+    user = update.effective_user
+
+    if state == "awaiting_username":
+        await update.message.reply_text(VERIFY_WAIT)
+        is_valid = await check_referral_on_catapult(text)
+
+        if is_valid:
+            clean_username = text.lstrip("@").strip()
+            await api_update_user(user.id, {"catapult_username": clean_username, "onboarded": 1})
+            context.user_data["state"] = "awaiting_calendly"
+
+            user_data = await api_get_user(str(user.id))
+            ref_code = user_data["ref_code"] if user_data else str(user.id)
+
+            await update.message.reply_text(
+                VERIFY_SUCCESS.format(name=user.first_name),
+                reply_markup=miniapp_keyboard(ref_code)
+            )
+        else:
+            await update.message.reply_text(VERIFY_FAIL.format(username=text))
+        return True
+
+    if state == "awaiting_calendly":
+        if text.startswith("http"):
+            await api_update_user(user.id, {"calendly_link": text})
+            user_data = await api_get_user(str(user.id))
+            ref_code = user_data["ref_code"] if user_data else str(user.id)
+            miniapp_url = f"{MINIAPP_URL}?ref={ref_code}"
+            await update.message.reply_text(
+                CALENDLY_SAVED.format(miniapp_url=miniapp_url),
+                reply_markup=miniapp_keyboard(ref_code)
+            )
+            context.user_data["state"] = "done"
+        else:
+            await update.message.reply_text("Пришли ссылку (начинается с https://) или напиши /skip")
+        return True
+
+    existing = await api_get_user(str(user.id))
+    if existing and text.startswith("http"):
+        await api_update_user(user.id, {"calendly_link": text})
+        miniapp_url = f"{MINIAPP_URL}?ref={existing['ref_code']}"
+        await update.message.reply_text(
+            CALENDLY_SAVED.format(miniapp_url=miniapp_url),
+            reply_markup=miniapp_keyboard(existing["ref_code"])
+        )
+        return True
+
+    return False
+
+
+async def skip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_data = await api_get_user(str(user.id))
+
+    if not user_data:
+        await update.message.reply_text("Сначала пройди регистрацию — напиши /start")
+        return
+
+    miniapp_url = f"{MINIAPP_URL}?ref={user_data['ref_code']}"
+    context.user_data["state"] = "done"
+    await update.message.reply_text(
+        CALENDLY_SKIPPED.format(miniapp_url=miniapp_url),
+        reply_markup=miniapp_keyboard(user_data["ref_code"])
+    )
+
+async def my_app_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data = await api_get_user(str(update.effective_user.id))
+    if user_data:
+        await update.message.reply_text("Твой Mini App:", reply_markup=miniapp_keyboard(user_data["ref_code"]))
+    else:
+        await update.message.reply_text("Сначала пройди регистрацию — напиши /start")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ── WARMUP DIALOG (новый прогрев) — доступен через /warmup, не основной /start ─
+# ════════════════════════════════════════════════════════════════════════════
+
+async def cmd_warmup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Альтернативный вход — живой диалог-прогрев через Claude.
+    Не заменяет основной /start, доступен отдельной командой пока проверяем.
+    """
+    tg_id = str(update.effective_user.id)
     state = await get_dialog_state(tg_id)
 
     if state["stage"] == "done":
@@ -1288,10 +1608,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
             ]
         }
-        await update.message.reply_text(
-            "👋 Привет снова! Вот твоё приложение:",
-            reply_markup=keyboard
-        )
+        await update.message.reply_text("👋 Привет снова! Вот твоё приложение:", reply_markup=keyboard)
         return
 
     if state["stage"] == "quiz":
@@ -1307,6 +1624,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state["history"] = [{"role": "assistant", "content": opening}]
     await save_dialog_state(tg_id, state)
     await update.message.reply_text(opening)
+
+
+
 
 
 async def start_connect_flow(update_or_query, context: ContextTypes.DEFAULT_TYPE):
@@ -1522,6 +1842,11 @@ async def main():
 
     # ── Catapult Connect (все пользователи) ──
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("skip", skip_cmd))
+    app.add_handler(CommandHandler("myapp", my_app_cmd))
+    app.add_handler(CallbackQueryHandler(qualify_cb,      pattern="^(exp_|goal_|time_)"))
+    app.add_handler(CallbackQueryHandler(i_registered_cb, pattern="^i_registered$"))
+    app.add_handler(CommandHandler("warmup", cmd_warmup_start))
     app.add_handler(CommandHandler("connect", cmd_connect))
     app.add_handler(CommandHandler("disconnect", cmd_disconnect))
     app.add_handler(CallbackQueryHandler(handle_connect_start_button, pattern="^connect_start$"))
