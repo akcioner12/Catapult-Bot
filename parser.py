@@ -1155,7 +1155,7 @@ async def send_quiz_question(chat_id: int, step: int):
     }
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
-            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": chat_id,
                 "text": q["question"],
@@ -1836,7 +1836,7 @@ async def debug_log_all_updates(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def main():
-    app = Application.builder().token(PARSER_BOT_TOKEN).build()
+    app = Application.builder().token(MAIN_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
 
     app.add_error_handler(global_error_handler)
