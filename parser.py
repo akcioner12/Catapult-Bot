@@ -1434,8 +1434,8 @@ def qualify_kb_3() -> InlineKeyboardMarkup:
     ])
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Основной /start — восстановленный рабочий флоу квалификации (bot.py)."""
+async def cmd_legacy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Резервный кнопочный флоу квалификации (bot.py) — доступен через /legacy_start, не основной."""
     user = update.effective_user
     args = context.args
 
@@ -1593,11 +1593,16 @@ async def my_app_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── WARMUP DIALOG (новый прогрев) — доступен через /warmup, не основной /start ─
 # ════════════════════════════════════════════════════════════════════════════
 
-async def cmd_warmup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Альтернативный вход — живой диалог-прогрев через Claude.
-    Не заменяет основной /start, доступен отдельной командой пока проверяем.
+    Основной /start — живой диалог-прогрев через Claude.
+    /start connect (deep link из Mini App) — сразу переход к привязке API ключа, минуя прогрев.
     """
+    args = context.args
+    if args and args[0] == "connect":
+        await start_connect_flow(update, context)
+        return
+
     tg_id = str(update.effective_user.id)
     state = await get_dialog_state(tg_id)
 
@@ -1860,7 +1865,7 @@ async def main():
     app.add_handler(CommandHandler("myapp", my_app_cmd))
     app.add_handler(CallbackQueryHandler(qualify_cb,      pattern="^(exp_|goal_|time_)"))
     app.add_handler(CallbackQueryHandler(i_registered_cb, pattern="^i_registered$"))
-    app.add_handler(CommandHandler("warmup", cmd_warmup_start))
+    app.add_handler(CommandHandler("legacy_start", cmd_legacy_start))
     app.add_handler(CommandHandler("connect", cmd_connect))
     app.add_handler(CommandHandler("disconnect", cmd_disconnect))
     app.add_handler(CallbackQueryHandler(handle_connect_start_button, pattern="^connect_start$"))
