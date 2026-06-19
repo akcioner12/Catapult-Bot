@@ -767,6 +767,11 @@ async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     post_id = editing_post.get(user_id)
     if not post_id:
+        # Админ не в режиме редактирования поста — тоже может тестировать warmup-диалог
+        if context.user_data.get('awaiting_api_key'):
+            await handle_api_key_for_users(update, context)
+        else:
+            await handle_warmup_message(update, context)
         return
 
     post = pending_posts.get(post_id)
