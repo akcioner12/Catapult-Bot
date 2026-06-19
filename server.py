@@ -56,6 +56,7 @@ def init_db():
             inviter_ref     TEXT    DEFAULT NULL,
             calendly_link   TEXT    DEFAULT NULL,
             catapult_ref    TEXT    DEFAULT NULL,
+            catapult_jwt    TEXT    DEFAULT NULL,
             qualify_exp     TEXT    DEFAULT NULL,
             qualify_goal    TEXT    DEFAULT NULL,
             qualify_time    TEXT    DEFAULT NULL,
@@ -83,10 +84,12 @@ class CreateUserRequest(BaseModel):
     name:         str
     inviter_ref:  Optional[str] = None
     qualify_data: Optional[dict] = None
+    catapult_jwt: Optional[str] = None
 
 class UpdateUserRequest(BaseModel):
     calendly_link: Optional[str] = None
     catapult_ref:  Optional[str] = None
+    catapult_jwt:  Optional[str] = None
 
     class Config:
         extra = "allow"
@@ -101,21 +104,34 @@ class GraphQLRequest(BaseModel):
     query: str
     variables: Optional[dict] = None
 
+class UserGraphQLRequest(BaseModel):
+    query: str
+    variables: Optional[dict] = None
+    jwt: str
+
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup():
     init_db()
+    # Миграция — добавляем новые поля если их нет (для существующих БД)
+    conn = get_db()
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN catapult_jwt TEXT DEFAULT NULL")
+        conn.commit()
+        logger.info("Migration: added catapult_jwt column")
+    except Exception:
+        pass  # Поле уже существует
+    conn.close()
     logger.info("DB initialized")
 
-# ── ПРОКСИ для Catapult GraphQL API ──────────────────────────────────────────
+# ── ПРОКСИ для Catapult GraphQL API (публичные запросы, общий JWT) ───────────
 
 @app.post("/api/catapult")
 async def catapult_proxy(payload: GraphQLRequest):
     """
-    Прокси для запросов к Catapult Trade GraphQL API.
-    Mini App вызывает этот эндпоинт, сервер передаёт запрос к Catapult.
-    Решает проблему CORS в браузере.
+    Прокси для публичных запросов к Catapult Trade GraphQL API.
+    Mini App вызывает этот эндпоинт для общей статистики платформы.
     """
     if not CATAPULT_JWT:
         raise HTTPException(500, "CATAPULT_JWT not configured")
@@ -138,6 +154,35 @@ async def catapult_proxy(payload: GraphQLRequest):
         logger.error(f"Catapult proxy error: {e}")
         raise HTTPException(502, f"Catapult API error: {str(e)}")
 
+# ── ПРОКСИ для личных запросов (JWT конкретного пользователя) ────────────────
+
+@app.post("/api/catapult/user")
+async def catapult_user_proxy(payload: UserGraphQLRequest):
+    """
+    Прокси для личных запросов — использует JWT конкретного пользователя.
+    Используется Личным Кабинетом в Mini App.
+    """
+    if not payload.jwt:
+        raise HTTPException(400, "JWT required")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                CATAPULT_API,
+                json={
+                    "query": payload.query,
+                    "variables": payload.variables or {}
+                },
+                headers={
+                    "Authorization": f"Bearer {payload.jwt}",
+                    "Content-Type": "application/json"
+                }
+            )
+            return resp.json()
+    except Exception as e:
+        logger.error(f"Catapult user proxy error: {e}")
+        raise HTTPException(502, f"Catapult API error: {str(e)}")
+
 # ── Эндпоинты — пользователи ──────────────────────────────────────────────────
 
 @app.post("/users", status_code=201)
@@ -154,12 +199,13 @@ async def create_user(data: CreateUserRequest):
         conn.execute("""
             INSERT INTO users
                 (telegram_id, username, name, ref_code, inviter_ref,
-                 qualify_exp, qualify_goal, qualify_time)
-            VALUES (?,?,?,?,?,?,?,?)
+                 qualify_exp, qualify_goal, qualify_time, catapult_jwt)
+            VALUES (?,?,?,?,?,?,?,?,?)
         """, (
             data.telegram_id, data.username, data.name, ref_code,
             data.inviter_ref,
-            q.get("exp"), q.get("goal"), q.get("time")
+            q.get("exp"), q.get("goal"), q.get("time"),
+            data.catapult_jwt
         ))
         conn.commit()
 
@@ -171,6 +217,16 @@ async def create_user(data: CreateUserRequest):
             "SELECT * FROM users WHERE telegram_id=?", (data.telegram_id,)
         ).fetchone()
         if user:
+            # Если пользователь уже есть, но прислали jwt — обновим его
+            if data.catapult_jwt:
+                conn.execute(
+                    "UPDATE users SET catapult_jwt=? WHERE telegram_id=?",
+                    (data.catapult_jwt, data.telegram_id)
+                )
+                conn.commit()
+                user = conn.execute(
+                    "SELECT * FROM users WHERE telegram_id=?", (data.telegram_id,)
+                ).fetchone()
             return dict(user)
         raise HTTPException(400, "User already exists")
     finally:
@@ -205,10 +261,13 @@ async def update_user(telegram_id: str, data: UpdateUserRequest):
     if data.catapult_ref is not None:
         updates.append("catapult_ref=?")
         params.append(data.catapult_ref)
+    if data.catapult_jwt is not None:
+        updates.append("catapult_jwt=?")
+        params.append(data.catapult_jwt)
 
     extra = data.model_extra or {}
     for key, val in extra.items():
-        if key in ("catapult_username", "onboarded"):
+        if key in ("catapult_username", "onboarded", "catapult_jwt"):
             updates.append(f"{key}=?")
             params.append(val)
 
