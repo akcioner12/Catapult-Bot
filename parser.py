@@ -1825,11 +1825,25 @@ async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
 
 
+async def debug_log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Логирует АБСОЛЮТНО любое входящее обновление — для диагностики."""
+    try:
+        uid = update.effective_user.id if update.effective_user else "?"
+        text = update.message.text if update.message else "(no text)"
+        logger.info(f"🔔 RAW UPDATE RECEIVED: user_id={uid} text={text!r}")
+    except Exception as e:
+        logger.info(f"🔔 RAW UPDATE RECEIVED but failed to parse: {e}")
+
+
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
 
     app.add_error_handler(global_error_handler)
+
+    # Диагностика: логируем каждое сообщение ПЕРВЫМ, group=-1 чтобы сработал раньше всех остальных
+    app.add_handler(MessageHandler(filters.ALL, debug_log_all_updates), group=-1)
+
 
     # ── Команды модерации (админ) ──
     app.add_handler(CommandHandler("generate", cmd_generate))
