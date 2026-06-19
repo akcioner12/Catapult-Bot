@@ -1,11 +1,12 @@
 """
-Автопарсер контента v7
+Автопарсер контента v7 + Catapult Connect
 - Ежевечерний сбор постов (20:00) для публикации на следующий день
 - 7 постов в день: Крипта, Catapult, ИИ, Catapult, Опрос, Форекс, Крипта
 - Одобрение через кнопки: ✅ Одобрить / ✏️ Редактировать / 🔄 Переписать / ❌ Отменить
 - После одобрения — автопубликация по расписанию
 - ТЗ для картинки к каждому посту
 - Воскресный контент-план в 19:00
+- /start + кнопка "Подключить аккаунт Catapult" для обычных пользователей (Личный Кабинет в Mini App)
 """
 
 import os
@@ -35,6 +36,10 @@ TGSTAT_TOKEN     = os.getenv("TGSTAT_TOKEN", "")
 CLAUDE_API_URL   = "https://api.anthropic.com/v1/messages"
 TGSTAT_API_URL   = "https://api.tgstat.ru"
 TOP_POSTS        = 5
+
+BACKEND_URL      = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
+MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://akcioner12.github.io/Catapult-Trade/")
+CATAPULT_GRAPHQL = "https://public-api.catapult.trade/graphql"
 
 # ── Каналы ────────────────────────────────────────────────────────────────────
 CHANNELS = {
@@ -568,7 +573,7 @@ async def send_for_approval(post_text: str, category: str, slot: str, source: st
             }
         )
 
-# ── Обработчики кнопок ────────────────────────────────────────────────────────
+# ── Обработчики кнопок (модерация постов — только админ) ─────────────────────
 async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -671,7 +676,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
-# ── Обработчик фото ──────────────────────────────────────────────────────────
+# ── Обработчик фото (только админ) ────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_TG_ID:
@@ -731,10 +736,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Photo download error: {e}")
         await update.message.reply_text(f"❌ Ошибка при сохранении картинки: {e}")
 
-# ── Обработчик редактирования ─────────────────────────────────────────────────
+# ── Обработчик редактирования (только админ) — теперь маршрутизирует обычных юзеров ──
 async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
+    # Обычные пользователи — обрабатываем как возможный ввод API ключа Catapult
     if user_id != ADMIN_TG_ID:
+        await handle_api_key_for_users(update, context)
         return
 
     if update.message.text == "/cancel":
@@ -951,7 +959,7 @@ async def send_weekly_plan():
             }
         )
 
-# ── Команды ──────────────────────────────────────────────────────────────────
+# ── Команды модерации (только админ) ──────────────────────────────────────────
 async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
@@ -1027,10 +1035,231 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text, parse_mode="HTML")
 
+# ════════════════════════════════════════════════════════════════════════════
+# ── CATAPULT CONNECT — флоу для обычных пользователей (Личный Кабинет) ──────
+# ════════════════════════════════════════════════════════════════════════════
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /start и /start connect (deep link из кнопки Mini App).
+    context.args == ['connect'] если пришли по ссылке ?start=connect
+    """
+    args = context.args
+
+    if args and args[0] == "connect":
+        await start_connect_flow(update, context)
+        return
+
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "📱 Открыть приложение", "web_app": {"url": MINIAPP_URL}}],
+            [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
+        ]
+    }
+    await update.message.reply_text(
+        "👋 Привет! Это гайд-бот по Catapult Trade.\n\n"
+        "Открой приложение чтобы посмотреть статистику платформы, "
+        "или подключи свой аккаунт чтобы видеть личный баланс и позиции.",
+        reply_markup=keyboard
+    )
+
+
+async def start_connect_flow(update_or_query, context: ContextTypes.DEFAULT_TYPE):
+    """Первый экран выбора: Инструкция / Ввести ключ. Ключ пока НЕ запрашивается."""
+    text = (
+        "🔑 <b>Привязка аккаунта Catapult Trade</b>\n\n"
+        "Чтобы открыть Личный Кабинет в Mini App, нужен твой API ключ с catapult.trade.\n\n"
+        "Выбери действие:"
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "📖 Инструкция", "callback_data": "connect_howto"}],
+            [{"text": "🔑 Ввести ключ", "callback_data": "connect_enter_key"}],
+            [{"text": "❌ Отмена", "callback_data": "connect_cancel"}],
+        ]
+    }
+    context.user_data['awaiting_api_key'] = False
+
+    if hasattr(update_or_query, "message") and update_or_query.message:
+        await update_or_query.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        await update_or_query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+async def handle_connect_start_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка 'Подключить аккаунт Catapult' из /start"""
+    query = update.callback_query
+    await query.answer()
+    await start_connect_flow(query, context)
+
+
+async def handle_connect_howto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка 'Инструкция' — как найти ключ на catapult.trade"""
+    query = update.callback_query
+    await query.answer()
+
+    text = (
+        "📖 <b>Как найти API ключ на Catapult Trade</b>\n\n"
+        "1️⃣ Открой <b>catapult.trade</b> в браузере\n\n"
+        "2️⃣ Войди в свой аккаунт\n\n"
+        "3️⃣ Открой меню (значок ☰ <b>Menu</b> снизу)\n\n"
+        "4️⃣ Найди раздел <b>API Key</b> (значок 🔑)\n\n"
+        "5️⃣ Скопируй ключ кнопкой <b>Copy</b>\n\n"
+        "6️⃣ Вернись сюда и нажми «Ввести ключ»\n\n"
+        "⚠️ <b>Важно:</b> никогда не отправляй этот ключ никому кроме этого бота."
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "🌐 Открыть Catapult Trade", "url": "https://catapult.trade/r/akcioner12"}],
+            [{"text": "🔑 Ввести ключ", "callback_data": "connect_enter_key"}],
+            [{"text": "⬅️ Назад", "callback_data": "connect_retry"}],
+        ]
+    }
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    context.user_data['awaiting_api_key'] = False
+
+
+async def handle_connect_enter_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка 'Ввести ключ' — теперь реально ждём сообщение с ключом"""
+    query = update.callback_query
+    await query.answer()
+
+    text = (
+        "🔑 <b>Вставь свой API ключ</b>\n\n"
+        "Скопируй ключ из Catapult (Menu → API Key → Copy) и отправь его следующим сообщением."
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "📖 Инструкция", "callback_data": "connect_howto"}],
+            [{"text": "❌ Отмена", "callback_data": "connect_cancel"}],
+        ]
+    }
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    context.user_data['awaiting_api_key'] = True
+
+
+async def handle_connect_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Кнопка 'Назад' — на первый экран выбора"""
+    query = update.callback_query
+    await query.answer()
+    await start_connect_flow(query, context)
+
+
+async def handle_connect_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data['awaiting_api_key'] = False
+    await query.edit_message_text("❌ Привязка отменена.")
+
+
+async def handle_api_key_for_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Вызывается из handle_edit_message для всех НЕ-админов.
+    Проверяет, ждём ли мы от этого пользователя API ключ; если да — обрабатывает.
+    """
+    if not context.user_data.get('awaiting_api_key'):
+        return  # обычное сообщение не по теме — игнорируем
+
+    api_key = update.message.text.strip()
+
+    if not api_key.startswith('eyJ') or len(api_key) < 50:
+        await update.message.reply_text(
+            "⚠️ Это не похоже на API ключ.\n\n"
+            "Ключ должен начинаться с <code>eyJ</code> и быть длинной строкой.\n"
+            "Попробуй ещё раз или нажми «Отмена».",
+            parse_mode="HTML",
+            reply_markup={"inline_keyboard": [[{"text": "❌ Отмена", "callback_data": "connect_cancel"}]]}
+        )
+        return
+
+    await update.message.reply_text("⏳ Проверяю ключ...")
+
+    profile_name = "Трейдер"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            test_resp = await client.post(
+                CATAPULT_GRAPHQL,
+                json={"query": "{ userMe { id profileName } }"},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            )
+            test_data = test_resp.json()
+            user_me = test_data.get("data", {}).get("userMe")
+
+            if not user_me:
+                await update.message.reply_text(
+                    "❌ Ключ не прошёл проверку.\n\n"
+                    "Убедись что скопировал ключ полностью из раздела <b>API Key</b> на catapult.trade",
+                    parse_mode="HTML",
+                    reply_markup={"inline_keyboard": [[{"text": "🔄 Попробовать снова", "callback_data": "connect_retry"}]]}
+                )
+                return
+            profile_name = user_me.get("profileName") or user_me.get("id", "Трейдер")
+    except Exception as e:
+        logger.error(f"API key validation error: {e}")
+        # Не блокируем сохранение — сохраним как есть, проверим позже в Mini App
+
+    tg_id = str(update.effective_user.id)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            check = await client.get(f"{BACKEND_URL}/users/{tg_id}")
+            if check.status_code == 200:
+                await client.patch(
+                    f"{BACKEND_URL}/users/by-telegram/{tg_id}",
+                    json={"catapult_jwt": api_key}
+                )
+            else:
+                name = update.effective_user.full_name or "Трейдер"
+                username = update.effective_user.username or ""
+                await client.post(
+                    f"{BACKEND_URL}/users",
+                    json={"telegram_id": tg_id, "username": username, "name": name, "catapult_jwt": api_key}
+                )
+    except Exception as e:
+        logger.error(f"DB save error: {e}")
+        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
+        context.user_data['awaiting_api_key'] = False
+        return
+
+    context.user_data['awaiting_api_key'] = False
+
+    await update.message.reply_text(
+        f"✅ <b>Аккаунт подключён!</b>\n\n"
+        f"👤 Профиль: <b>{profile_name}</b>\n\n"
+        f"Открой Mini App — Личный Кабинет уже разблокирован 🎉",
+        parse_mode="HTML",
+        reply_markup={"inline_keyboard": [[
+            {"text": "📱 Открыть Mini App", "web_app": {"url": MINIAPP_URL}}
+        ]]}
+    )
+
+
+async def cmd_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отвязать аккаунт Catapult — доступно всем пользователям"""
+    tg_id = str(update.effective_user.id)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(
+                f"{BACKEND_URL}/users/by-telegram/{tg_id}",
+                json={"catapult_jwt": None}
+            )
+            if resp.status_code == 200:
+                await update.message.reply_text("✅ Аккаунт Catapult отвязан.")
+            else:
+                await update.message.reply_text("⚠️ Пользователь не найден в базе.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+
+async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Запасной вариант — команда /connect делает то же самое, что кнопка"""
+    await start_connect_flow(update, context)
+
 # ── Запуск ────────────────────────────────────────────────────────────────────
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
+
+    # ── Команды модерации (админ) ──
     app.add_handler(CommandHandler("generate", cmd_generate))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("queue", cmd_queue))
@@ -1038,7 +1267,19 @@ async def main():
     app.add_handler(CommandHandler("test_generate", cmd_test_generate))
     app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
+
+    # ── Catapult Connect (все пользователи) ──
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("connect", cmd_connect))
+    app.add_handler(CommandHandler("disconnect", cmd_disconnect))
+    app.add_handler(CallbackQueryHandler(handle_connect_start_button, pattern="^connect_start$"))
+    app.add_handler(CallbackQueryHandler(handle_connect_howto,        pattern="^connect_howto$"))
+    app.add_handler(CallbackQueryHandler(handle_connect_enter_key,    pattern="^connect_enter_key$"))
+    app.add_handler(CallbackQueryHandler(handle_connect_retry,        pattern="^connect_retry$"))
+    app.add_handler(CallbackQueryHandler(handle_connect_cancel,       pattern="^connect_cancel$"))
+
+    # ── Текстовые сообщения: админ -> редактирование постов, остальные -> ввод API ключа ──
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_message))
 
     scheduler = AsyncIOScheduler(timezone="Europe/Kiev")
 
@@ -1057,10 +1298,11 @@ async def main():
         )
 
     scheduler.start()
-    logger.info("✅ Parser v7 запущен!")
+    logger.info("✅ Parser v7 + Catapult Connect запущен!")
     logger.info("📅 Генерация: каждый день в 20:00")
     logger.info("📊 Контент-план: воскресенье 19:00")
     logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
+    logger.info("🔑 Catapult Connect: /start, /connect, /disconnect")
 
     load_pending()
     await app.initialize()
