@@ -1500,9 +1500,16 @@ async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_connect_flow(update, context)
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
+async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    """Логирует любые необработанные исключения внутри handler'ов — без этого они проглатываются молча."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+
+
 async def main():
     app = Application.builder().token(PARSER_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
+
+    app.add_error_handler(global_error_handler)
 
     # ── Команды модерации (админ) ──
     app.add_handler(CommandHandler("generate", cmd_generate))
