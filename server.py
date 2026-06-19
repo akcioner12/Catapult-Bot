@@ -8,6 +8,7 @@ import uuid
 import string
 import random
 import logging
+import json
 import httpx
 from datetime import datetime
 from typing import Optional
@@ -67,6 +68,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_ref_code    ON users(ref_code);
         CREATE INDEX IF NOT EXISTS idx_telegram_id ON users(telegram_id);
         CREATE INDEX IF NOT EXISTS idx_inviter_ref ON users(inviter_ref);
+
+        CREATE TABLE IF NOT EXISTS dialogs (
+            telegram_id     TEXT PRIMARY KEY,
+            history         TEXT DEFAULT '[]',
+            stage           TEXT DEFAULT 'chatting',
+            quiz_answers    TEXT DEFAULT '[]',
+            quiz_step       INTEGER DEFAULT 0,
+            updated_at      TEXT DEFAULT (datetime('now'))
+        );
     """)
     conn.commit()
     conn.close()
@@ -108,6 +118,12 @@ class UserGraphQLRequest(BaseModel):
     query: str
     variables: Optional[dict] = None
     jwt: str
+
+class DialogState(BaseModel):
+    history: list = []
+    stage: str = "chatting"          # chatting | quiz | done
+    quiz_answers: list = []
+    quiz_step: int = 0
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
@@ -293,6 +309,48 @@ async def get_referrals(ref_code: str):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+# ── Диалог-прогрев (история чата + результаты викторины) ─────────────────────
+
+@app.get("/dialog/{telegram_id}")
+async def get_dialog(telegram_id: str):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM dialogs WHERE telegram_id=?", (telegram_id,)).fetchone()
+    conn.close()
+    if not row:
+        return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+    d = dict(row)
+    d["history"] = json.loads(d["history"])
+    d["quiz_answers"] = json.loads(d["quiz_answers"])
+    return d
+
+@app.post("/dialog/{telegram_id}")
+async def save_dialog(telegram_id: str, data: DialogState):
+    conn = get_db()
+    existing = conn.execute("SELECT telegram_id FROM dialogs WHERE telegram_id=?", (telegram_id,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE dialogs SET history=?, stage=?, quiz_answers=?, quiz_step=?, updated_at=datetime('now') WHERE telegram_id=?",
+            (json.dumps(data.history, ensure_ascii=False), data.stage,
+             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step, telegram_id)
+        )
+    else:
+        conn.execute(
+            "INSERT INTO dialogs (telegram_id, history, stage, quiz_answers, quiz_step) VALUES (?,?,?,?,?)",
+            (telegram_id, json.dumps(data.history, ensure_ascii=False), data.stage,
+             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step)
+        )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.delete("/dialog/{telegram_id}")
+async def reset_dialog(telegram_id: str):
+    conn = get_db()
+    conn.execute("DELETE FROM dialogs WHERE telegram_id=?", (telegram_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 # ── Вебхук от Catapult Trade ──────────────────────────────────────────────────
 
