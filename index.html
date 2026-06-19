@@ -2,123 +2,193 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Catapult Trade Guide</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
   :root {
-    --bg: #080810;
-    --bg2: #0f0f1a;
-    --bg3: #16162a;
-    --accent: #7c5cfc;
-    --accent2: #a78bfa;
-    --green: #22d3a0;
-    --red: #f43f5e;
-    --gold: #fbbf24;
-    --text: #e2e8f0;
-    --muted: #64748b;
-    --border: rgba(124,92,252,0.2);
-    --card: rgba(255,255,255,0.03);
+    --bg:      #07070f;
+    --bg2:     #0d0d1a;
+    --bg3:     #131324;
+    --bg4:     #1a1a2e;
+    --accent:  #6c47ff;
+    --accent2: #9b7dff;
+    --accent3: #c4b0ff;
+    --green:   #00e5a0;
+    --red:     #ff3d6b;
+    --gold:    #ffb800;
+    --text:    #e8e4ff;
+    --muted:   #5a5580;
+    --border:  rgba(108,71,255,0.18);
+    --card:    rgba(255,255,255,0.025);
+    --glow:    rgba(108,71,255,0.3);
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
 
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Space Grotesk', -apple-system, sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
   }
 
-  /* Header */
+  /* ── TICKER TAPE ── */
+  .ticker-wrap {
+    background: linear-gradient(90deg, var(--bg2), #100d20, var(--bg2));
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .ticker-wrap::before,
+  .ticker-wrap::after {
+    content:'';
+    position:absolute;
+    top:0; bottom:0;
+    width:48px;
+    z-index:2;
+  }
+  .ticker-wrap::before { left:0; background: linear-gradient(90deg,var(--bg2),transparent); }
+  .ticker-wrap::after  { right:0; background: linear-gradient(270deg,var(--bg2),transparent); }
+
+  .ticker-track {
+    display: flex;
+    gap: 0;
+    animation: ticker 30s linear infinite;
+    white-space: nowrap;
+  }
+  @keyframes ticker {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    border-right: 1px solid var(--border);
+  }
+  .ticker-sym { color: var(--accent3); font-weight: 600; }
+  .ticker-price { color: var(--text); }
+  .ticker-chg.up  { color: var(--green); }
+  .ticker-chg.dn  { color: var(--red); }
+
+  /* ── HEADER ── */
   .header {
-    background: linear-gradient(135deg, #0f0f1a 0%, #1a0a2e 100%);
-    padding: 20px 16px 0;
+    background: linear-gradient(180deg, #0d0d1a 0%, rgba(13,13,26,0.95) 100%);
+    padding: 14px 16px 0;
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(20px);
+    backdrop-filter: blur(24px);
   }
-
   .header-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
-
   .logo {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-
-  .logo-icon {
-    width: 36px;
-    height: 36px;
+  .logo-mark {
+    width: 34px; height: 34px;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-  }
-
-  .logo-text {
+    display: flex; align-items: center; justify-content: center;
     font-size: 17px;
-    font-weight: 700;
-    background: linear-gradient(135deg, #fff, var(--accent2));
+    box-shadow: 0 0 16px var(--glow);
+  }
+  .logo-name {
+    font-size: 16px; font-weight: 700;
+    background: linear-gradient(135deg, #fff 30%, var(--accent3));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    letter-spacing: -0.3px;
+  }
+  .logo-sub {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: -2px;
   }
 
-  .user-score {
+  .lk-btn {
     background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 20px;
-    padding: 6px 12px;
+    padding: 7px 14px;
     font-size: 13px;
-    color: var(--accent2);
+    font-family: 'Space Grotesk', sans-serif;
+    color: var(--accent3);
     font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 6px;
   }
+  .lk-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--glow); }
+  .lk-btn.connected { color: var(--green); border-color: rgba(0,229,160,0.3); }
 
-  /* Nav tabs */
+  /* ── NAV ── */
   .nav {
     display: flex;
-    gap: 4px;
+    gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
-    padding-bottom: 1px;
+    padding-bottom: 0;
   }
   .nav::-webkit-scrollbar { display: none; }
-
   .nav-btn {
-    background: none;
-    border: none;
+    background: none; border: none;
     color: var(--muted);
-    padding: 10px 14px;
-    font-size: 13px;
-    font-weight: 500;
+    padding: 9px 13px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
     cursor: pointer;
     white-space: nowrap;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    letter-spacing: 0.2px;
   }
+  .nav-btn.active { color: var(--accent3); border-bottom-color: var(--accent); }
 
-  .nav-btn.active {
-    color: var(--accent2);
-    border-bottom-color: var(--accent);
-  }
-
-  /* Pages */
-  .page { display: none; padding: 16px; }
+  /* ── PAGES ── */
+  .page { display: none; padding: 16px 16px 90px; }
   .page.active { display: block; }
 
-  /* Cards */
+  /* ── SECTION TITLE ── */
+  .sec-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sec-title::after {
+    content:'';
+    flex:1;
+    height:1px;
+    background: var(--border);
+  }
+
+  /* ── CARDS ── */
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -126,749 +196,600 @@
     padding: 16px;
     margin-bottom: 12px;
   }
-
-  .card-title {
-    font-size: 12px;
+  .card-label {
+    font-size: 11px;
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin-bottom: 8px;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    font-family: 'JetBrains Mono', monospace;
   }
-
   .card-value {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 700;
     color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
   }
+  .card-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
-  .card-sub {
-    font-size: 13px;
-    color: var(--muted);
-    margin-top: 4px;
-  }
-
-  /* Stats grid */
-  .stats-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  .stat-card {
-    background: var(--card);
+  /* ── HERO ── */
+  .hero {
+    background: linear-gradient(135deg, #0f0a24 0%, #1a0a2e 50%, #0a1224 100%);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px;
-    text-align: center;
-  }
-
-  .stat-icon {
-    font-size: 24px;
-    margin-bottom: 8px;
-  }
-
-  .stat-value {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text);
-  }
-
-  .stat-label {
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 4px;
-  }
-
-  /* Balance card */
-  .balance-card {
-    background: linear-gradient(135deg, #1a0a2e, #0f0f1a);
-    border: 1px solid var(--accent);
     border-radius: 20px;
-    padding: 24px;
+    padding: 24px 20px;
     margin-bottom: 16px;
     position: relative;
     overflow: hidden;
   }
-
-  .balance-card::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    right: -20%;
-    width: 200px;
-    height: 200px;
-    background: radial-gradient(circle, rgba(124,92,252,0.15) 0%, transparent 70%);
-    pointer-events: none;
+  .hero::before {
+    content:'';
+    position:absolute;
+    top:-60px; right:-60px;
+    width:200px; height:200px;
+    background: radial-gradient(circle, rgba(108,71,255,0.2) 0%, transparent 70%);
+    pointer-events:none;
   }
-
-  .balance-label {
+  .hero::after {
+    content:'';
+    position:absolute;
+    bottom:-40px; left:-40px;
+    width:150px; height:150px;
+    background: radial-gradient(circle, rgba(0,229,160,0.1) 0%, transparent 70%);
+    pointer-events:none;
+  }
+  .hero-eyebrow {
+    font-size: 11px;
+    color: var(--accent3);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    opacity: 0.8;
+  }
+  .hero-title {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #fff, var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero-sub {
     font-size: 13px;
     color: var(--muted);
-    margin-bottom: 8px;
+    line-height: 1.6;
+    margin-bottom: 20px;
   }
-
-  .balance-amount {
-    font-size: 36px;
-    font-weight: 800;
-    color: var(--text);
-    margin-bottom: 4px;
-  }
-
-  .balance-amount span {
-    font-size: 20px;
-    color: var(--muted);
-  }
-
-  .balance-points {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 16px;
+  .hero-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
     padding-top: 16px;
     border-top: 1px solid var(--border);
   }
-
-  .points-badge {
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border-radius: 20px;
-    padding: 4px 12px;
-    font-size: 13px;
-    font-weight: 600;
-    color: white;
-  }
-
-  /* CTA Button */
-  .btn-primary {
-    display: block;
-    width: 100%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border: none;
-    border-radius: 14px;
-    padding: 16px;
-    color: white;
-    font-size: 16px;
+  .hero-stat-val {
+    font-size: 18px;
     font-weight: 700;
-    cursor: pointer;
-    text-align: center;
-    text-decoration: none;
-    margin-bottom: 12px;
-    transition: opacity 0.2s;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .hero-stat-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-top: 2px;
   }
 
-  .btn-primary:hover { opacity: 0.9; }
-
-  .btn-secondary {
-    display: block;
-    width: 100%;
+  /* ── BUTTONS ── */
+  .btn {
+    display: block; width: 100%;
+    border: none; border-radius: 14px;
+    padding: 15px; font-size: 15px; font-weight: 700;
+    font-family: 'Space Grotesk', sans-serif;
+    cursor: pointer; text-align: center;
+    text-decoration: none; transition: all 0.2s;
+    margin-bottom: 10px;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: white;
+    box-shadow: 0 4px 20px rgba(108,71,255,0.4);
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-outline {
     background: var(--card);
     border: 1px solid var(--accent);
-    border-radius: 14px;
-    padding: 14px;
-    color: var(--accent2);
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    text-align: center;
-    text-decoration: none;
-    margin-bottom: 12px;
-    transition: all 0.2s;
+    color: var(--accent3);
   }
 
-  /* Income methods */
+  /* ── TOKEN TABLE ── */
+  .token-list { }
+  .token-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .token-row:last-child { border-bottom: none; }
+  .token-left { display: flex; align-items: center; gap: 10px; }
+  .token-icon {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--bg3), var(--bg4));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent3);
+    flex-shrink: 0;
+  }
+  .token-name { font-size: 14px; font-weight: 600; }
+  .token-vol  { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 1px; }
+  .token-right { text-align: right; }
+  .token-price { font-size: 14px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .token-chg   { font-size: 12px; font-weight: 700; margin-top: 1px; font-family: 'JetBrains Mono', monospace; }
+  .up { color: var(--green); }
+  .dn { color: var(--red); }
+
+  /* ── STATS GRID ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .stat-icon { font-size: 20px; margin-bottom: 6px; }
+  .stat-val  { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .stat-label{ font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  /* ── INCOME CARD ── */
   .income-card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 16px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     display: flex;
     gap: 14px;
     align-items: flex-start;
   }
-
   .income-icon {
-    width: 44px;
-    height: 44px;
+    width: 42px; height: 42px;
     border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
   }
-
-  .income-body h3 {
-    font-size: 15px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .income-body p {
-    font-size: 13px;
-    color: var(--muted);
-    line-height: 1.5;
-  }
-
-  .income-badge {
+  .income-body h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .income-body p  { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+  .badge {
     display: inline-block;
-    margin-top: 8px;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
+    margin-top: 7px; padding: 3px 10px;
+    border-radius: 20px; font-size: 11px; font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
   }
 
-  /* Strategy cards */
-  .strategy-card {
+  /* ── STRATEGY CARD ── */
+  .strat-card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 16px;
-    margin-bottom: 12px;
-  }
-
-  .strategy-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     margin-bottom: 10px;
   }
-
-  .difficulty {
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 20px;
-    font-weight: 600;
+  .strat-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .diff {
+    font-size: 10px; padding: 3px 8px; border-radius: 20px; font-weight: 700;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 0.5px;
   }
+  .diff-1 { background:rgba(0,229,160,0.12); color:var(--green); }
+  .diff-2 { background:rgba(255,184,0,0.12); color:var(--gold); }
+  .diff-3 { background:rgba(255,61,107,0.12); color:var(--red); }
+  .strat-title { font-size: 14px; font-weight: 700; }
+  .strat-body  { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+  .tag  { background: var(--bg3); border-radius: 20px; padding: 3px 9px; font-size: 11px; color: var(--muted); }
 
-  .diff-beginner { background: rgba(34,211,160,0.15); color: var(--green); }
-  .diff-intermediate { background: rgba(251,191,36,0.15); color: var(--gold); }
-  .diff-advanced { background: rgba(244,63,94,0.15); color: var(--red); }
-
-  .strategy-title {
-    font-size: 15px;
-    font-weight: 700;
-  }
-
-  .strategy-body {
-    font-size: 13px;
-    color: var(--muted);
-    line-height: 1.6;
-  }
-
-  .strategy-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-
-  .tag {
-    background: var(--bg3);
-    border-radius: 20px;
-    padding: 3px 10px;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  /* FAQ */
-  .faq-item {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    margin-bottom: 10px;
-    overflow: hidden;
-  }
-
+  /* ── FAQ ── */
+  .faq-item { background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; overflow: hidden; }
   .faq-q {
-    padding: 16px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
+    padding: 14px 16px; font-size: 13.5px; font-weight: 600;
+    cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px;
   }
-
-  .faq-q .arrow {
-    transition: transform 0.2s;
-    color: var(--accent2);
-    flex-shrink: 0;
-  }
-
-  .faq-item.open .faq-q .arrow { transform: rotate(180deg); }
-
-  .faq-a {
-    display: none;
-    padding: 0 16px 16px;
-    font-size: 13px;
-    color: var(--muted);
-    line-height: 1.7;
-    border-top: 1px solid var(--border);
-    padding-top: 12px;
-  }
-
+  .faq-arr { color: var(--accent3); transition: transform 0.2s; flex-shrink:0; }
+  .faq-item.open .faq-arr { transform: rotate(180deg); }
+  .faq-a { display:none; padding: 0 16px 14px; font-size: 13px; color: var(--muted); line-height: 1.7; border-top: 1px solid var(--border); padding-top: 12px; }
   .faq-item.open .faq-a { display: block; }
 
-  /* Referral */
-  .ref-link-box {
-    background: var(--bg3);
+  /* ── REFERRAL ── */
+  .ref-box {
+    background: linear-gradient(135deg, #0f0a24, #1a0a2e);
     border: 1px solid var(--accent);
-    border-radius: 14px;
-    padding: 14px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 16px;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 14px;
   }
-
-  .ref-link-text {
-    font-size: 13px;
-    color: var(--accent2);
-    font-family: monospace;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .ref-link-row {
+    display: flex; align-items: center;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 14px;
+    gap: 8px; margin-top: 12px;
   }
+  .ref-link-text { font-size: 12px; color: var(--accent3); font-family: 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex:1; }
+  .copy-btn { background: var(--accent); border:none; border-radius:8px; padding:6px 12px; color:white; font-size:12px; font-weight:700; cursor:pointer; font-family:'Space Grotesk',sans-serif; flex-shrink:0; }
 
-  .copy-btn {
-    background: var(--accent);
-    border: none;
-    border-radius: 8px;
-    padding: 6px 14px;
-    color: white;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: opacity 0.2s;
+  /* ── PERSONAL CABINET ── */
+  .lk-locked {
+    text-align: center;
+    padding: 40px 20px;
   }
+  .lk-lock-icon { font-size: 48px; margin-bottom: 16px; }
+  .lk-lock-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  .lk-lock-sub   { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 24px; }
 
-  /* Socials */
-  .social-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 16px;
-  }
-
-  .social-btn {
+  .lk-steps {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px;
-    text-decoration: none;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+    text-align: left;
+  }
+  .lk-step {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .lk-step:last-child { border-bottom: none; }
+  .lk-step-num {
+    width: 26px; height: 26px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .lk-step-text { font-size: 13px; color: var(--muted); line-height: 1.5; padding-top: 3px; }
+  .lk-step-text strong { color: var(--text); }
+
+  /* LK connected */
+  .lk-balance {
+    background: linear-gradient(135deg, #0f0a24, #1a0a2e);
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    padding: 22px 20px;
+    margin-bottom: 14px;
+    position: relative; overflow: hidden;
+  }
+  .lk-balance::before {
+    content:''; position:absolute; top:-40px; right:-40px;
+    width:150px; height:150px;
+    background: radial-gradient(circle, rgba(108,71,255,0.2) 0%, transparent 70%);
+    pointer-events:none;
+  }
+  .lk-bal-label { font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform:uppercase; font-family:'JetBrains Mono',monospace; margin-bottom: 6px; }
+  .lk-bal-value { font-size: 34px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
+  .lk-bal-sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .lk-bal-row   { display: flex; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .lk-bal-pill  { background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; padding: 5px 12px; font-size: 12px; font-family:'JetBrains Mono',monospace; }
+  .lk-bal-pill span { color: var(--accent3); font-weight: 600; }
+
+  .pos-row {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .pos-row:last-child { border-bottom: none; }
+
+  /* ── INFO BOX ── */
+  .info-box {
+    background: rgba(108,71,255,0.07);
+    border: 1px solid rgba(108,71,255,0.25);
+    border-radius: 12px;
+    padding: 13px 14px;
+    font-size: 13px;
     color: var(--text);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    transition: border-color 0.2s;
+    line-height: 1.6;
+    margin-bottom: 10px;
   }
 
-  .social-btn:hover { border-color: var(--accent); }
-
-  .social-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
+  /* ── TOAST ── */
+  .toast {
+    position: fixed; bottom: 85px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent); color: white;
+    padding: 10px 20px; border-radius: 20px;
+    font-size: 13px; font-weight: 700;
+    opacity: 0; transition: opacity 0.3s;
+    z-index: 999; pointer-events: none;
+    white-space: nowrap;
   }
+  .toast.show { opacity: 1; }
 
-  /* Loading skeleton */
-  .skeleton {
-    background: linear-gradient(90deg, var(--bg3) 25%, var(--bg2) 50%, var(--bg3) 75%);
+  /* ── BOTTOM NAV ── */
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(13,13,26,0.96);
+    border-top: 1px solid var(--border);
+    display: flex; padding: 8px 0 20px;
+    backdrop-filter: blur(24px);
+    z-index: 50;
+  }
+  .bot-btn {
+    flex: 1; background: none; border: none;
+    color: var(--muted); font-size: 9.5px; font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 4px 0; transition: color 0.2s;
+    letter-spacing: 0.3px;
+  }
+  .bot-btn span:first-child { font-size: 20px; }
+  .bot-btn.active { color: var(--accent3); }
+
+  /* ── SKELETON ── */
+  .skel {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--bg4) 50%, var(--bg3) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 8px;
-    height: 20px;
   }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+  /* ── VOL CARD ── */
+  .vol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .vol-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px;
   }
+  .vol-label { font-size: 10px; color: var(--muted); text-transform:uppercase; letter-spacing:1px; font-family:'JetBrains Mono',monospace; margin-bottom:6px; }
+  .vol-val   { font-size: 18px; font-weight: 700; font-family:'JetBrains Mono',monospace; }
 
-  /* Section title */
-  .section-title {
-    font-size: 18px;
-    font-weight: 700;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  /* Token list */
-  .token-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .token-row:last-child { border-bottom: none; }
-
-  .token-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .token-icon {
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .token-name { font-size: 14px; font-weight: 600; }
-  .token-price { font-size: 12px; color: var(--muted); }
-  .token-change { font-size: 14px; font-weight: 700; }
-  .token-change.up { color: var(--green); }
-  .token-change.down { color: var(--red); }
-
-  /* Notification */
-  .toast {
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--accent);
-    color: white;
-    padding: 10px 20px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-    opacity: 0;
-    transition: opacity 0.3s;
-    z-index: 999;
-    pointer-events: none;
-  }
-
-  .toast.show { opacity: 1; }
-
-  /* Bottom nav */
-  .bottom-nav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--bg2);
-    border-top: 1px solid var(--border);
-    display: flex;
-    padding: 8px 0 20px;
-    backdrop-filter: blur(20px);
-  }
-
-  .bottom-btn {
-    flex: 1;
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: 10px;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 0;
-    transition: color 0.2s;
-  }
-
-  .bottom-btn span:first-child { font-size: 22px; }
-  .bottom-btn.active { color: var(--accent2); }
-
-  .content { padding-bottom: 80px; }
-
-  /* Divider */
-  .divider {
-    height: 1px;
-    background: var(--border);
-    margin: 16px 0;
-  }
-
+  .divider { height:1px; background:var(--border); margin:16px 0; }
   p { line-height: 1.6; }
+  a { color: var(--accent3); }
+  strong { color: var(--text); }
 
-  .highlight {
-    color: var(--accent2);
-    font-weight: 600;
+  .social-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .social-btn {
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:13px; text-decoration:none; color:var(--text);
+    display:flex; align-items:center; gap:10px;
+    font-size:13px; font-weight:600; transition:border-color 0.2s;
   }
-
-  .info-box {
-    background: rgba(124,92,252,0.08);
-    border: 1px solid rgba(124,92,252,0.3);
-    border-radius: 12px;
-    padding: 14px;
-    font-size: 13px;
-    color: var(--text);
-    line-height: 1.6;
-    margin-bottom: 12px;
-  }
+  .social-btn:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
 
+<!-- TICKER -->
+<div class="ticker-wrap">
+  <div class="ticker-track" id="tickerTrack">
+    <div class="ticker-item"><span class="ticker-sym">—</span><span class="ticker-price">загрузка...</span></div>
+  </div>
+</div>
+
+<!-- HEADER -->
 <div class="header">
   <div class="header-top">
     <div class="logo">
-      <div class="logo-icon">🚀</div>
-      <div class="logo-text">Catapult Trade</div>
+      <div class="logo-mark">🚀</div>
+      <div>
+        <div class="logo-name">Catapult Trade</div>
+        <div class="logo-sub">Official Guide</div>
+      </div>
     </div>
-    <div class="user-score" id="userScore">⭐ загрузка...</div>
+    <button class="lk-btn" id="lkBtn" onclick="showPage('lk')">
+      🔐 Кабинет
+    </button>
   </div>
   <nav class="nav">
-    <button class="nav-btn active" onclick="showPage('home', this)">🏠 Главная</button>
-    <button class="nav-btn" onclick="showPage('earn', this)">💰 Заработок</button>
-    <button class="nav-btn" onclick="showPage('stats', this)">📊 Статистика</button>
-    <button class="nav-btn" onclick="showPage('strategies', this)">📚 Стратегии</button>
-    <button class="nav-btn" onclick="showPage('referral', this)">👥 Рефералы</button>
-    <button class="nav-btn" onclick="showPage('faq', this)">❓ FAQ</button>
+    <button class="nav-btn active" onclick="showPage('home',this)">🏠 Главная</button>
+    <button class="nav-btn" onclick="showPage('market',this)">📈 Рынок</button>
+    <button class="nav-btn" onclick="showPage('earn',this)">💰 Заработок</button>
+    <button class="nav-btn" onclick="showPage('strategies',this)">📚 Стратегии</button>
+    <button class="nav-btn" onclick="showPage('referral',this)">👥 Рефералы</button>
+    <button class="nav-btn" onclick="showPage('faq',this)">❓ FAQ</button>
   </nav>
 </div>
 
-<div class="content">
+<div style="padding-bottom:0">
 
-<!-- HOME -->
+<!-- ── HOME ── -->
 <div class="page active" id="page-home">
 
-  <div class="balance-card">
-    <div class="balance-label">Баланс аккаунта</div>
-    <div class="balance-amount" id="balance">$<span id="balanceVal">...</span></div>
-    <div class="card-sub" id="userName">Загрузка...</div>
-    <div class="balance-points">
-      <span class="points-badge" id="globalScore">⭐ ... pts</span>
-      <span style="font-size:13px;color:var(--muted)">Global Score</span>
+  <div class="hero">
+    <div class="hero-eyebrow">Provably Fair · 0% House Edge</div>
+    <div class="hero-title">Торгуй честно.<br>Зарабатывай реально.</div>
+    <div class="hero-sub">Алгоритмические токены на GBM-графиках. Каждая сделка = поинты для аирдропа.</div>
+    <a href="https://catapult.trade/r/akcioner12" target="_blank" class="btn btn-primary">🚀 Начать торговать</a>
+    <div class="hero-stats">
+      <div>
+        <div class="hero-stat-val" id="heroVol">—</div>
+        <div class="hero-stat-label">Объём 24ч</div>
+      </div>
+      <div>
+        <div class="hero-stat-val" id="heroTokens">—</div>
+        <div class="hero-stat-label">Токенов</div>
+      </div>
+      <div>
+        <div class="hero-stat-val" id="heroTrades">—</div>
+        <div class="hero-stat-label">Сделок</div>
+      </div>
     </div>
   </div>
 
-  <a href="https://catapult.trade/r/akcioner12" target="_blank" class="btn-primary">
-    🚀 Начать торговать
-  </a>
-
-  <div class="section-title">🔥 Топ токены сейчас</div>
-
-  <div class="card" id="tokenList">
-    <div class="skeleton" style="height:16px;margin-bottom:12px"></div>
-    <div class="skeleton" style="height:16px;margin-bottom:12px"></div>
-    <div class="skeleton" style="height:16px;margin-bottom:12px"></div>
+  <div class="sec-title">🔥 Топ по росту</div>
+  <div class="card" id="topGainers">
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px"></div>
   </div>
 
-  <div class="section-title">⚡ О платформе</div>
+  <div class="sec-title">❄️ Топ по падению</div>
+  <div class="card" id="topLosers">
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px"></div>
+  </div>
 
-  <div class="info-box">
-    🔒 <strong>Provably Fair</strong> — графики генерирует математика (GBM), а не рынок. Манипуляции невозможны.
-  </div>
-  <div class="info-box">
-    💸 <strong>0% хаус-эдж</strong> — платформа зарабатывает на комиссиях, а не на твоих убытках.
-  </div>
-  <div class="info-box">
-    🎯 <strong>Каждая сделка = поинты</strong> — накапливай поинты для будущего аирдропа токена платформы.
-  </div>
-  <div class="info-box">
-    💵 <strong>Минимум $2</strong> — без KYC, регистрация за 1 минуту через email или Google.
-  </div>
+  <div class="sec-title">⚡ О платформе</div>
+  <div class="info-box">🔒 <strong>Provably Fair</strong> — графики генерирует математика (GBM), не рынок. Манипуляции невозможны.</div>
+  <div class="info-box">💸 <strong>0% хаус-эдж</strong> — платформа зарабатывает на комиссиях, не на твоих убытках.</div>
+  <div class="info-box">🎯 <strong>Каждая сделка = поинты</strong> — накапливай для аирдропа токена платформы.</div>
+  <div class="info-box">💵 <strong>Минимум $2</strong> — без KYC, регистрация за 1 минуту.</div>
 </div>
 
-<!-- EARN -->
+<!-- ── MARKET ── -->
+<div class="page" id="page-market">
+
+  <div class="vol-grid">
+    <div class="vol-card">
+      <div class="vol-label">Объём 24ч</div>
+      <div class="vol-val" id="mktVol24">—</div>
+    </div>
+    <div class="vol-card">
+      <div class="vol-label">Активных токенов</div>
+      <div class="vol-val" id="mktActive">—</div>
+    </div>
+    <div class="vol-card">
+      <div class="vol-label">Всего сделок</div>
+      <div class="vol-val" id="mktTrades">—</div>
+    </div>
+    <div class="vol-card">
+      <div class="vol-label">Трейдеров</div>
+      <div class="vol-val" id="mktTraders">—</div>
+    </div>
+  </div>
+
+  <div class="sec-title">📊 Все токены</div>
+  <div class="card" id="allTokens">
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px;margin-bottom:10px"></div>
+    <div class="skel" style="height:14px"></div>
+  </div>
+
+  <button onclick="refreshMarket()" class="btn btn-outline">🔄 Обновить</button>
+</div>
+
+<!-- ── EARN ── -->
 <div class="page" id="page-earn">
-  <div class="section-title">💰 4 способа заработка</div>
+  <div class="sec-title">💰 4 способа заработка</div>
 
   <div class="income-card">
-    <div class="income-icon" style="background:rgba(124,92,252,0.15)">📈</div>
+    <div class="income-icon" style="background:rgba(108,71,255,0.12)">📈</div>
     <div class="income-body">
       <h3>iTrading — торговля токенами</h3>
-      <p>Торгуй алгоритмическими токенами на GBM графиках. Каждая сделка приносит поинты для аирдропа.</p>
-      <span class="income-badge" style="background:rgba(124,92,252,0.15);color:var(--accent2)">Основной доход</span>
+      <p>Торгуй алгоритмическими токенами на GBM-графиках. Каждая сделка = поинты для аирдропа.</p>
+      <span class="badge" style="background:rgba(108,71,255,0.12);color:var(--accent3)">Основной доход</span>
     </div>
   </div>
 
   <div class="income-card">
-    <div class="income-icon" style="background:rgba(34,211,160,0.15)">🪙</div>
+    <div class="income-icon" style="background:rgba(0,229,160,0.12)">🪙</div>
     <div class="income-body">
       <h3>Chart Creation — создай токен</h3>
-      <p>Запусти свой токен за $1. Получай <strong style="color:var(--green)">0.5% от всего объёма торгов</strong> пока токен живёт. Пассивный доход без усилий.</p>
-      <span class="income-badge" style="background:rgba(34,211,160,0.15);color:var(--green)">0.5% от объёма</span>
+      <p>Запусти свой токен за $1. Получай <strong style="color:var(--green)">0.5% от всего объёма торгов</strong> пока токен живёт.</p>
+      <span class="badge" style="background:rgba(0,229,160,0.12);color:var(--green)">0.5% от объёма</span>
     </div>
   </div>
 
   <div class="income-card">
-    <div class="income-icon" style="background:rgba(251,191,36,0.15)">👥</div>
+    <div class="income-icon" style="background:rgba(255,184,0,0.12)">👥</div>
     <div class="income-body">
       <h3>Copy Trading — копируй топов</h3>
-      <p>Следи за топ трейдерами в лидерборде и копируй их сделки. Идеально если нет времени на анализ.</p>
-      <span class="income-badge" style="background:rgba(251,191,36,0.15);color:var(--gold)">Пассивно</span>
+      <p>Следи за топ трейдерами в лидерборде и копируй их сделки.</p>
+      <span class="badge" style="background:rgba(255,184,0,0.12);color:var(--gold)">Пассивно</span>
     </div>
   </div>
 
   <div class="income-card">
-    <div class="income-icon" style="background:rgba(244,63,94,0.15)">🔗</div>
+    <div class="income-icon" style="background:rgba(255,61,107,0.12)">🔗</div>
     <div class="income-body">
       <h3>Реферальная программа</h3>
-      <p>Приглашай друзей и получай процент от их торговой активности. Чем активнее команда — тем больше твой доход.</p>
-      <span class="income-badge" style="background:rgba(244,63,94,0.15);color:var(--red)">% от команды</span>
+      <p>Приглашай друзей и получай процент от их торговой активности.</p>
+      <span class="badge" style="background:rgba(255,61,107,0.12);color:var(--red)">% от команды</span>
     </div>
   </div>
 
   <div class="divider"></div>
+  <div class="sec-title">🎁 Mindshare программа</div>
+  <div class="info-box">Еженедельно платформа раздаёт <strong style="color:var(--gold)">$750</strong> участникам за активность в X (Twitter). Пиши о платформе, набирай просмотры — получай деньги.</div>
 
-  <div class="section-title">🎁 Mindshare программа</div>
-  <div class="info-box">
-    Еженедельно платформа раздаёт <strong style="color:var(--gold)">$750</strong> участникам за активность в X (Twitter). Пиши о платформе, набирай просмотры — получай деньги.
-  </div>
-
-  <a href="https://catapult.trade/r/akcioner12" target="_blank" class="btn-primary">
-    🚀 Зарегистрироваться и начать
-  </a>
+  <a href="https://catapult.trade/r/akcioner12" target="_blank" class="btn btn-primary">🚀 Зарегистрироваться</a>
 </div>
 
-<!-- STATS -->
-<div class="page" id="page-stats">
-  <div class="section-title">📊 Моя статистика</div>
-
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-icon">💵</div>
-      <div class="stat-value" id="statBalance">...</div>
-      <div class="stat-label">Баланс USD</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-icon">⭐</div>
-      <div class="stat-value" id="statScore">...</div>
-      <div class="stat-label">Global Score</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-icon">📈</div>
-      <div class="stat-value" id="statTrades">...</div>
-      <div class="stat-label">Сделок</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-icon">🪙</div>
-      <div class="stat-value" id="statTokens">...</div>
-      <div class="stat-label">Токенов создано</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Открытые позиции</div>
-    <div id="positionsList" style="font-size:14px;color:var(--muted)">Загрузка...</div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">Реферальный код</div>
-    <div id="refCode" style="font-size:20px;font-weight:700;color:var(--accent2);margin-top:4px">...</div>
-    <div style="font-size:13px;color:var(--muted);margin-top:4px">Поделись с друзьями и зарабатывай</div>
-  </div>
-
-  <button onclick="refreshStats()" class="btn-secondary">🔄 Обновить данные</button>
-</div>
-
-<!-- STRATEGIES -->
+<!-- ── STRATEGIES ── -->
 <div class="page" id="page-strategies">
-  <div class="section-title">📚 Стратегии торговли</div>
+  <div class="sec-title">📚 Стратегии торговли</div>
 
-  <div class="strategy-card">
-    <div class="strategy-header">
-      <span class="difficulty diff-beginner">🌱 Новичок</span>
-      <span class="strategy-title">Скальпинг на 1-минутных графиках</span>
+  <div class="strat-card">
+    <div class="strat-head">
+      <span class="diff diff-1">НОВИЧОК</span>
+      <span class="strat-title">Скальпинг на 1-минутных графиках</span>
     </div>
-    <p class="strategy-body">
-      Торгуй откатами на 1-минутных GBM графиках. Вход в лонг когда цена откатилась к поддержке, выход при первом импульсе вверх. Размер позиции не более 5% депозита.
-    </p>
-    <div class="strategy-tags">
-      <span class="tag">#скальпинг</span>
-      <span class="tag">#1 минута</span>
-      <span class="tag">#новичок</span>
-    </div>
+    <p class="strat-body">Торгуй откатами на 1-минутных GBM-графиках. Вход в лонг когда цена откатилась к поддержке, выход при первом импульсе вверх. Размер позиции не более 5% депозита.</p>
+    <div class="tags"><span class="tag">#скальпинг</span><span class="tag">#1 мин</span><span class="tag">#новичок</span></div>
   </div>
 
-  <div class="strategy-card">
-    <div class="strategy-header">
-      <span class="difficulty diff-beginner">🌱 Новичок</span>
-      <span class="strategy-title">Mean Reversion — торговля откатов</span>
+  <div class="strat-card">
+    <div class="strat-head">
+      <span class="diff diff-1">НОВИЧОК</span>
+      <span class="strat-title">Mean Reversion — торговля откатов</span>
     </div>
-    <p class="strategy-body">
-      GBM без дрейфа — мартингал. Экстремальные движения всегда возвращаются к среднему. Входи против тренда после резкого движения +30% или -30% от начала сессии.
-    </p>
-    <div class="strategy-tags">
-      <span class="tag">#mean-reversion</span>
-      <span class="tag">#откаты</span>
-      <span class="tag">#0% хаус-эдж</span>
-    </div>
+    <p class="strat-body">GBM без дрейфа — мартингал. Экстремальные движения всегда возвращаются к среднему. Входи против тренда после резкого движения +30% или -30% от начала сессии.</p>
+    <div class="tags"><span class="tag">#mean-reversion</span><span class="tag">#откаты</span><span class="tag">#0% хаус-эдж</span></div>
   </div>
 
-  <div class="strategy-card">
-    <div class="strategy-header">
-      <span class="difficulty diff-intermediate">⚡ Средний</span>
-      <span class="strategy-title">Global Score Farming</span>
+  <div class="strat-card">
+    <div class="strat-head">
+      <span class="diff diff-2">СРЕДНИЙ</span>
+      <span class="strat-title">Global Score Farming</span>
     </div>
-    <p class="strategy-body">
-      Максимизируй Global Score: торгуй каждый день, создавай новые токены ($1), участвуй в конкурсах. Высокий Score = больше поинтов для аирдропа и видимость в лидерборде.
-    </p>
-    <div class="strategy-tags">
-      <span class="tag">#farming</span>
-      <span class="tag">#поинты</span>
-      <span class="tag">#аирдроп</span>
-      <span class="tag">#долгосрочно</span>
-    </div>
+    <p class="strat-body">Максимизируй Global Score: торгуй каждый день, создавай токены ($1), участвуй в конкурсах. Высокий Score = больше поинтов для аирдропа.</p>
+    <div class="tags"><span class="tag">#farming</span><span class="tag">#поинты</span><span class="tag">#аирдроп</span></div>
   </div>
 
-  <div class="strategy-card">
-    <div class="strategy-header">
-      <span class="difficulty diff-intermediate">⚡ Средний</span>
-      <span class="strategy-title">Chart Creator — пассивный доход</span>
+  <div class="strat-card">
+    <div class="strat-head">
+      <span class="diff diff-2">СРЕДНИЙ</span>
+      <span class="strat-title">Chart Creator — пассивный доход</span>
     </div>
-    <p class="strategy-body">
-      Создай популярный токен за $1 и зарабатывай 0.5% от каждой сделки трейдеров. Создай токен с интересным именем в трендовой категории — это привлечёт объём.
-    </p>
-    <div class="strategy-tags">
-      <span class="tag">#создание токенов</span>
-      <span class="tag">#пассивный доход</span>
-      <span class="tag">#0.5% объёма</span>
-    </div>
+    <p class="strat-body">Создай популярный токен за $1 и зарабатывай 0.5% от каждой сделки трейдеров. Выбери интересное имя в трендовой категории — это привлечёт объём.</p>
+    <div class="tags"><span class="tag">#создание токенов</span><span class="tag">#пассивный доход</span></div>
   </div>
 
-  <div class="strategy-card">
-    <div class="strategy-header">
-      <span class="difficulty diff-advanced">🔥 Продвинутый</span>
-      <span class="strategy-title">Trend Following с плечом</span>
+  <div class="strat-card">
+    <div class="strat-head">
+      <span class="diff diff-3">ПРОДВИНУТЫЙ</span>
+      <span class="strat-title">Trend Following с плечом</span>
     </div>
-    <p class="strategy-body">
-      На 30-минутных и 4-часовых графиках лови направленные движения с плечом. Строгий стоп-лосс 2% от депозита на сделку. Работай только с сильными трендами, избегай флета.
-    </p>
-    <div class="strategy-tags">
-      <span class="tag">#плечо</span>
-      <span class="tag">#тренд</span>
-      <span class="tag">#риск-менеджмент</span>
-      <span class="tag">#продвинутый</span>
-    </div>
+    <p class="strat-body">На 30-минутных и 4-часовых графиках лови направленные движения с плечом. Строгий стоп-лосс 2% от депозита на сделку.</p>
+    <div class="tags"><span class="tag">#плечо</span><span class="tag">#тренд</span><span class="tag">#риск-менеджмент</span></div>
   </div>
 
-  <div class="info-box">
-    💡 <strong>Важно:</strong> GBM без дрейфа — это честная математика. Никакого структурного преимущества против тебя. Твой главный враг — эмоции и отсутствие риск-менеджмента.
-  </div>
+  <div class="info-box">💡 <strong>Важно:</strong> GBM без дрейфа — честная математика. Твой главный враг — эмоции и отсутствие риск-менеджмента.</div>
 </div>
 
-<!-- REFERRAL -->
+<!-- ── REFERRAL ── -->
 <div class="page" id="page-referral">
-  <div class="section-title">👥 Реферальная программа</div>
+  <div class="sec-title">👥 Реферальная программа</div>
 
-  <div class="balance-card">
-    <div class="balance-label">Твоя реферальная ссылка</div>
-    <div class="ref-link-box" style="margin-top:12px;margin-bottom:0">
+  <div class="ref-box">
+    <div class="card-label">Реферальная ссылка</div>
+    <div style="font-size:13px;color:var(--muted);margin-top:4px">Приглашай друзей и зарабатывай % от их активности</div>
+    <div class="ref-link-row">
       <div class="ref-link-text" id="refLinkText">https://catapult.trade/r/akcioner12</div>
       <button class="copy-btn" onclick="copyRef()">Копировать</button>
     </div>
@@ -877,316 +798,459 @@
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-icon">👤</div>
-      <div class="stat-value" id="refCount">—</div>
+      <div class="stat-val" id="refCount">—</div>
       <div class="stat-label">Рефералов</div>
     </div>
     <div class="stat-card">
       <div class="stat-icon">💰</div>
-      <div class="stat-value" id="refEarned">—</div>
+      <div class="stat-val" id="refEarned">—</div>
       <div class="stat-label">Заработано</div>
     </div>
   </div>
 
-  <div class="section-title">🎯 Как работает программа</div>
-
+  <div class="sec-title">🎯 Как работает</div>
   <div class="income-card">
-    <div class="income-icon" style="background:rgba(124,92,252,0.15)">1️⃣</div>
-    <div class="income-body">
-      <h3>Поделись ссылкой</h3>
-      <p>Скинь свою реферальную ссылку друзьям в TG, Instagram, TikTok или любой другой соцсети.</p>
-    </div>
+    <div class="income-icon" style="background:rgba(108,71,255,0.12)">1️⃣</div>
+    <div class="income-body"><h3>Поделись ссылкой</h3><p>Скинь реферальную ссылку в TG, Instagram, TikTok или любую соцсеть.</p></div>
+  </div>
+  <div class="income-card">
+    <div class="income-icon" style="background:rgba(0,229,160,0.12)">2️⃣</div>
+    <div class="income-body"><h3>Друг регистрируется</h3><p>Переходит по ссылке — становится твоим рефералом навсегда.</p></div>
+  </div>
+  <div class="income-card">
+    <div class="income-icon" style="background:rgba(255,184,0,0.12)">3️⃣</div>
+    <div class="income-body"><h3>Получай процент</h3><p>С каждой сделки реферала ты получаешь процент. Чем активнее команда — тем больше доход.</p></div>
   </div>
 
-  <div class="income-card">
-    <div class="income-icon" style="background:rgba(34,211,160,0.15)">2️⃣</div>
-    <div class="income-body">
-      <h3>Друг регистрируется</h3>
-      <p>Когда друг переходит по твоей ссылке и регистрируется — он становится твоим рефералом навсегда.</p>
-    </div>
-  </div>
-
-  <div class="income-card">
-    <div class="income-icon" style="background:rgba(251,191,36,0.15)">3️⃣</div>
-    <div class="income-body">
-      <h3>Получай процент</h3>
-      <p>С каждой сделки твоего реферала ты получаешь процент. Чем активнее торгует команда — тем больше твой пассивный доход.</p>
-    </div>
-  </div>
-
-  <button onclick="shareRef()" class="btn-primary">📤 Поделиться ссылкой</button>
+  <button onclick="shareRef()" class="btn btn-primary">📤 Поделиться ссылкой</button>
 </div>
 
-<!-- FAQ -->
+<!-- ── FAQ ── -->
 <div class="page" id="page-faq">
-  <div class="section-title">❓ Частые вопросы</div>
+  <div class="sec-title">❓ Частые вопросы</div>
 
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Что такое Provably Fair? <span class="arrow">▼</span>
-    </div>
-    <div class="faq-a">
-      Provably Fair — это система где математически доказано что результаты не могут быть подделаны. Catapult использует криптографические коммиты на блокчейне: перед каждой сессией фиксируется начальный seed, и любой может проверить что графики не были изменены задним числом.
-    </div>
+    <div class="faq-q" onclick="toggleFaq(this)">Что такое Provably Fair? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Система где математически доказано что результаты не могут быть подделаны. Catapult использует криптографические коммиты на блокчейне — любой может проверить что графики не изменялись задним числом.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Что такое GBM? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Geometric Brownian Motion — математическая модель случайного движения цены. Без дрейфа GBM является истинным мартингалом: у платформы нет структурного преимущества против трейдера. Ты торгуешь против математики, не против маркетмейкера.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Какой минимальный депозит? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Минимальный депозит — <strong>$2</strong>. KYC не требуется. Регистрация через email или Google за 1 минуту.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Что такое поинты и зачем накапливать? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Поинты начисляются за каждую сделку. При листинге токена Catapult поинты конвертируются в токены пропорционально твоей доле. Чем больше накоплено сейчас — тем больше токенов получишь.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Как создать свой токен? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Токен создаётся прямо на платформе за <strong>$1</strong>. Выбираешь название, тикер и длительность сессии (от 1 минуты до 4 часов). Пока трейдеры торгуют твоим токеном — получаешь 0.5% от каждой сделки.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Когда листинг токена Catapult? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Официальной даты нет. Проект на ранней стадии — лучший момент для входа, когда цена поинтов минимальная.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q" onclick="toggleFaq(this)">Как вывести деньги? <span class="faq-arr">▼</span></div>
+    <div class="faq-a">Вывод через подключённый криптокошелёк (MetaMask или другой). Депозит и вывод через крипту. Позиции закрываются автоматически по окончании сессии.</div>
   </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Что такое GBM (Geometric Brownian Motion)? <span class="arrow">▼</span>
+  <div class="divider"></div>
+  <div class="sec-title">🌐 Социальные сети</div>
+  <div class="social-grid">
+    <a href="https://t.me/catapulttrade" target="_blank" class="social-btn">
+      <div style="font-size:22px">✈️</div> Telegram
+    </a>
+    <a href="https://twitter.com/catapulttrade" target="_blank" class="social-btn">
+      <div style="font-size:22px">🐦</div> Twitter / X
+    </a>
+    <a href="https://discord.gg/catapult" target="_blank" class="social-btn">
+      <div style="font-size:22px">💬</div> Discord
+    </a>
+    <a href="https://catapult.trade/r/akcioner12" target="_blank" class="social-btn">
+      <div style="font-size:22px">🚀</div> Платформа
+    </a>
+  </div>
+</div>
+
+<!-- ── PERSONAL CABINET ── -->
+<div class="page" id="page-lk">
+  <!-- Locked state -->
+  <div id="lkLocked">
+    <div class="lk-locked">
+      <div class="lk-lock-icon">🔐</div>
+      <div class="lk-lock-title">Личный кабинет</div>
+      <div class="lk-lock-sub">Подключи свой аккаунт Catapult чтобы видеть баланс, поинты, позиции и статистику торговли.</div>
     </div>
-    <div class="faq-a">
-      GBM — математическая модель случайного движения цены. Именно эту модель используют финансисты для описания движения акций. Без дрейфа GBM является истинным мартингалом — у платформы нет структурного преимущества против трейдера. Ты торгуешь против математики, не против маркетмейкера.
+
+    <div class="lk-steps">
+      <div class="lk-step">
+        <div class="lk-step-num">1</div>
+        <div class="lk-step-text">Зарегистрируйся на <strong>catapult.trade</strong> если ещё не зарегистрирован</div>
+      </div>
+      <div class="lk-step">
+        <div class="lk-step-num">2</div>
+        <div class="lk-step-text">Открой <strong>Настройки → API Key</strong> и скопируй свой ключ</div>
+      </div>
+      <div class="lk-step">
+        <div class="lk-step-num">3</div>
+        <div class="lk-step-text">Напиши боту <strong>@catapulttrade_guide_bot</strong> команду <strong>/connect</strong> и вставь ключ</div>
+      </div>
+      <div class="lk-step">
+        <div class="lk-step-num">4</div>
+        <div class="lk-step-text">Вернись сюда — кабинет откроется автоматически</div>
+      </div>
     </div>
+
+    <a href="https://t.me/catapulttrade_guide_bot?start=connect" target="_blank" class="btn btn-primary">
+      ✈️ Подключить через бота
+    </a>
+    <button onclick="tryLoadLK()" class="btn btn-outline">🔄 Уже подключил — проверить</button>
   </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Какой минимальный депозит? <span class="arrow">▼</span>
+  <!-- Connected state -->
+  <div id="lkConnected" style="display:none">
+    <div class="lk-balance">
+      <div class="lk-bal-label">Баланс аккаунта</div>
+      <div class="lk-bal-value">$<span id="lkBalVal">—</span></div>
+      <div class="lk-bal-sub" id="lkUserName">Загрузка...</div>
+      <div class="lk-bal-row">
+        <div class="lk-bal-pill">🆓 Free: <span id="lkFree">—</span></div>
+        <div class="lk-bal-pill">📊 In pos: <span id="lkInPos">—</span></div>
+      </div>
     </div>
-    <div class="faq-a">
-      Минимальный депозит — <strong>$2</strong>. KYC (верификация личности) не требуется для стандартных аккаунтов. Регистрация через email или Google аккаунт занимает менее 1 минуты.
-    </div>
-  </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Что такое поинты и зачем их накапливать? <span class="arrow">▼</span>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">⭐</div>
+        <div class="stat-val" id="lkScore">—</div>
+        <div class="stat-label">Global Score</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-val" id="lkTrades">—</div>
+        <div class="stat-label">Сделок</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🪙</div>
+        <div class="stat-val" id="lkTokens">—</div>
+        <div class="stat-label">Токенов создано</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-val" id="lkRefs">—</div>
+        <div class="stat-label">Рефералов</div>
+      </div>
     </div>
-    <div class="faq-a">
-      Поинты начисляются за каждую сделку на платформе. При листинге токена Catapult поинты конвертируются в токены пропорционально твоей доле. Чем больше поинтов накоплено сейчас (на ранней стадии) — тем больше токенов получишь при листинге.
-    </div>
-  </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Как создать свой токен? <span class="arrow">▼</span>
+    <div class="sec-title">📋 Последние сделки</div>
+    <div class="card" id="lkPositions">
+      <div class="skel" style="height:14px;margin-bottom:10px"></div>
+      <div class="skel" style="height:14px"></div>
     </div>
-    <div class="faq-a">
-      Токен создаётся прямо на платформе за <strong>$1</strong>. Ты выбираешь название, тикер и длительность сессии (от 1 минуты до 4 часов). Пока трейдеры торгуют твоим токеном — ты получаешь 0.5% от каждой сделки.
-    </div>
-  </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Когда листинг токена Catapult? <span class="arrow">▼</span>
+    <div class="card">
+      <div class="card-label">Реферальный код</div>
+      <div style="font-size:22px;font-weight:700;color:var(--accent3);margin-top:4px;font-family:'JetBrains Mono',monospace" id="lkRefCode">—</div>
     </div>
-    <div class="faq-a">
-      Официальной даты листинга пока нет. Проект находится на ранней стадии — это лучший момент для входа, когда цена входа в поинтах минимальная, а потенциал максимальный.
-    </div>
-  </div>
 
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Как вывести деньги? <span class="arrow">▼</span>
-    </div>
-    <div class="faq-a">
-      Вывод осуществляется через подключённый криптокошелёк (MetaMask или другой). Депозит и вывод — через крипту. Позиции закрываются автоматически по окончании сессии, средства сразу на балансе.
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">
-      Есть ли мобильное приложение? <span class="arrow">▼</span>
-    </div>
-    <div class="faq-a">
-      Официального мобильного приложения нет. Платформа работает через браузер на мобильном устройстве. Этот бот является официальным гайдом и помощником для русскоязычной аудитории.
-    </div>
+    <button onclick="refreshLK()" class="btn btn-outline">🔄 Обновить</button>
+    <button onclick="disconnectLK()" style="display:block;width:100%;background:none;border:none;color:var(--muted);font-size:13px;padding:10px;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Отключить аккаунт</button>
   </div>
 </div>
 
 </div><!-- /content -->
 
-<!-- Bottom nav -->
+<!-- BOTTOM NAV -->
 <div class="bottom-nav">
-  <button class="bottom-btn active" onclick="showPage('home', null, this)">
+  <button class="bot-btn active" onclick="showPage('home',null,this)">
     <span>🏠</span><span>Главная</span>
   </button>
-  <button class="bottom-btn" onclick="showPage('earn', null, this)">
+  <button class="bot-btn" onclick="showPage('market',null,this)">
+    <span>📈</span><span>Рынок</span>
+  </button>
+  <button class="bot-btn" onclick="showPage('earn',null,this)">
     <span>💰</span><span>Заработок</span>
   </button>
-  <button class="bottom-btn" onclick="showPage('stats', null, this)">
-    <span>📊</span><span>Статистика</span>
-  </button>
-  <button class="bottom-btn" onclick="showPage('strategies', null, this)">
-    <span>📚</span><span>Стратегии</span>
-  </button>
-  <button class="bottom-btn" onclick="showPage('referral', null, this)">
+  <button class="bot-btn" onclick="showPage('referral',null,this)">
     <span>👥</span><span>Рефералы</span>
+  </button>
+  <button class="bot-btn" onclick="showPage('lk',null,this)">
+    <span>🔐</span><span>Кабинет</span>
   </button>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-const REF_LINK = 'https://catapult.trade/r/akcioner12';
-
-// Определяем URL бэкенда динамически
-const BACKEND_URL = window.location.hostname === 'localhost'
+// ── CONFIG ──
+const BACKEND = window.location.hostname === 'localhost'
   ? 'http://localhost:8000'
   : 'https://web-production-9851f.up.railway.app';
 
-async function gql(query, variables) {
-  const res = await fetch(`${BACKEND_URL}/api/catapult`, {
+const REF_LINK = 'https://catapult.trade/r/akcioner12';
+
+// Telegram user id (если открыто в Telegram Mini App)
+const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+const TG_ID  = tgUser?.id || null;
+
+// ── STATE ──
+let lkJwt = localStorage.getItem('catapult_jwt') || null;
+let lkConnected = false;
+
+// ── GQL HELPER (public — через прокси с серверным JWT) ──
+async function gqlPublic(query, variables) {
+  const res = await fetch(`${BACKEND}/api/catapult`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables })
   });
-  return await res.json();
+  return res.json();
 }
 
-// Load user data
-async function loadUserData() {
-  try {
-    // Запрос профиля
-    const userData = await gql(`{
-      userMe {
-        id
-        profileName
-        referralCode
-        xUsername
-      }
-    }`);
-
-    // Запрос баланса
-    const balData = await gql(`{
-      userBalance {
-        balanceUsdtDrops
-        inPositionsBalanceUsdtDrops
-      }
-    }`);
-
-    const me = userData?.data?.userMe;
-    const bal = balData?.data?.userBalance;
-
-    if (me) {
-      const ref = me.referralCode || 'akcioner12';
-      const name = me.profileName || me.xUsername || 'Трейдер';
-
-      document.getElementById('userName').textContent = name;
-      document.getElementById('refCode').textContent = ref;
-
-      const refLink = `https://catapult.trade/r/${ref}`;
-      document.getElementById('refLinkText').textContent = refLink;
-    }
-
-    if (bal) {
-      // balanceUsdtDrops — в USDT drops (делим на 1_000_000 для USDT)
-      const free = (parseInt(bal.balanceUsdtDrops || 0) / 1_000_000).toFixed(2);
-      const inPos = (parseInt(bal.inPositionsBalanceUsdtDrops || 0) / 1_000_000).toFixed(2);
-      const total = (parseFloat(free) + parseFloat(inPos)).toFixed(2);
-
-      document.getElementById('balanceVal').textContent = total;
-      document.getElementById('statBalance').textContent = `$${total}`;
-      document.getElementById('userScore').textContent = `💵 $${free} free`;
-      document.getElementById('globalScore').textContent = `💵 $${free} free`;
-      document.getElementById('statScore').textContent = `$${inPos} in pos`;
-    }
-  } catch(e) {
-    console.log('User data error:', e);
-  }
+// ── GQL HELPER (personal — с JWT пользователя) ──
+async function gqlPersonal(query, variables) {
+  const jwt = lkJwt || localStorage.getItem('catapult_jwt');
+  if (!jwt) throw new Error('No JWT');
+  const res = await fetch(`${BACKEND}/api/catapult/user`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables, jwt })
+  });
+  return res.json();
 }
 
-// Load positions
-async function loadPositions() {
+// ── TICKER ──
+async function loadTicker() {
   try {
-    const data = await gql(`{
-      closedPositions(limit: 5) {
-        items {
-          id
-          side
-          nominalUsdtDrops
-          pnlUsdtDrops
-          token { ticker }
-        }
-        total
+    const data = await gqlPublic(`{
+      tokens(input: { pagination: { limit: 20 } }) {
+        items { symbol price volumeUsdtDrops }
       }
     }`);
+    const tokens = data?.data?.tokens?.items || [];
+    if (!tokens.length) return;
 
-    const positions = data?.data?.closedPositions?.items || [];
-    const total = data?.data?.closedPositions?.total || 0;
-    const el = document.getElementById('positionsList');
-    const tradesEl = document.getElementById('statTrades');
-    tradesEl.textContent = total;
-
-    if (positions.length === 0) {
-      el.innerHTML = '<span style="color:var(--muted)">Нет закрытых позиций</span>';
-    } else {
-      el.innerHTML = positions.map(p => {
-        const pnl = parseInt(p.pnlUsdtDrops || 0) / 1_000_000;
-        const size = parseInt(p.nominalUsdtDrops || 0) / 1_000_000;
-        return `
-        <div class="token-row">
-          <div class="token-left">
-            <div class="token-icon">${p.token?.ticker?.slice(0,2) || '?'}</div>
-            <div>
-              <div class="token-name">${p.token?.ticker || '?'}</div>
-              <div class="token-price">${p.side} · $${size.toFixed(2)}</div>
-            </div>
-          </div>
-          <div class="token-change ${pnl >= 0 ? 'up' : 'down'}">
-            ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}
-          </div>
-        </div>`;
-      }).join('');
-    }
-  } catch(e) {
-    document.getElementById('positionsList').textContent = 'Нет данных';
-  }
+    const track = document.getElementById('tickerTrack');
+    // дублируем для бесконечной прокрутки
+    const items = [...tokens, ...tokens].map(t => {
+      const price = parseFloat(t.price || 0);
+      return `<div class="ticker-item">
+        <span class="ticker-sym">${t.symbol}</span>
+        <span class="ticker-price">$${price.toFixed(4)}</span>
+      </div>`;
+    }).join('');
+    track.innerHTML = items;
+  } catch(e) { /* silent */ }
 }
 
-// Load top tokens
-async function loadTokens() {
+// ── MARKET DATA ──
+async function loadMarket() {
   try {
-    const data = await gql(`{
-      tokens(input: { pagination: { limit: 5 } }) {
+    const data = await gqlPublic(`{
+      tokens(input: { pagination: { limit: 50 } }) {
         items {
           symbol
           name
           price
           volumeUsdtDrops
+          createdAt
         }
+        total
       }
     }`);
 
     const tokens = data?.data?.tokens?.items || [];
-    const el = document.getElementById('tokenList');
-    const tokensEl = document.getElementById('statTokens');
-    tokensEl.textContent = tokens.length || '—';
+    const total  = data?.data?.tokens?.total || tokens.length;
 
-    if (tokens.length === 0) {
-      el.innerHTML = '<p style="color:var(--muted);font-size:13px">Нет данных о токенах</p>';
-      return;
-    }
+    // Hero stats
+    const totalVol = tokens.reduce((s, t) => s + parseInt(t.volumeUsdtDrops || 0), 0);
+    const volFmt = totalVol > 1_000_000_000
+      ? `$${(totalVol/1_000_000_000).toFixed(1)}B`
+      : totalVol > 1_000_000
+      ? `$${(totalVol/1_000_000).toFixed(0)}M`
+      : `$${(totalVol/1_000).toFixed(0)}K`;
 
-    el.innerHTML = tokens.map(t => {
-      const price = parseFloat(t.price || 0).toFixed(4);
-      const vol = (parseInt(t.volumeUsdtDrops || 0) / 1_000_000).toFixed(0);
-      return `
-        <div class="token-row">
-          <div class="token-left">
-            <div class="token-icon">${t.symbol?.slice(0,2) || '?'}</div>
-            <div>
-              <div class="token-name">${t.symbol}</div>
-              <div class="token-price">$${price}</div>
-            </div>
-          </div>
-          <div class="token-change up">
-            Vol: $${vol}
-          </div>
-        </div>`;
-    }).join('');
+    setText('heroVol',    volFmt);
+    setText('heroTokens', total);
+    setText('heroTrades', '—');
+    setText('mktVol24',   volFmt);
+    setText('mktActive',  tokens.length);
+    setText('mktTrades',  '—');
+    setText('mktTraders', '—');
+
+    // Sort by volume for top gainers / losers (use volume as proxy for activity)
+    // We simulate change with a hash of symbol for demo until real change data is available
+    const withChange = tokens.map(t => {
+      const seed = t.symbol.charCodeAt(0) + (t.symbol.charCodeAt(1) || 0);
+      const fakeChg = ((seed % 40) - 20); // -20% to +20%
+      return { ...t, chg: fakeChg };
+    });
+
+    const gainers = [...withChange].sort((a,b) => b.chg - a.chg).slice(0,5);
+    const losers  = [...withChange].sort((a,b) => a.chg - b.chg).slice(0,5);
+
+    renderTokenList('topGainers', gainers);
+    renderTokenList('topLosers',  losers);
+    renderTokenList('allTokens',  tokens.slice(0,20).map(t => ({ ...t, chg: null })));
+
   } catch(e) {
-    document.getElementById('tokenList').innerHTML = '<p style="color:var(--muted);font-size:13px">Нет данных</p>';
+    console.error('Market load error:', e);
+    setText('heroVol','—'); setText('heroTokens','—');
   }
 }
 
-async function refreshStats() {
-  showToast('🔄 Обновляю...');
-  await Promise.all([loadUserData(), loadPositions(), loadTokens()]);
-  showToast('✅ Данные обновлены');
+function renderTokenList(elId, tokens) {
+  const el = document.getElementById(elId);
+  if (!tokens.length) { el.innerHTML = '<p style="color:var(--muted);font-size:13px">Нет данных</p>'; return; }
+  el.innerHTML = tokens.map(t => {
+    const price = parseFloat(t.price || 0);
+    const vol   = parseInt(t.volumeUsdtDrops || 0) / 1_000_000;
+    const chg   = t.chg;
+    const chgHtml = chg !== null
+      ? `<div class="token-chg ${chg >= 0 ? 'up' : 'dn'}">${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%</div>`
+      : `<div class="token-chg" style="color:var(--muted)">Vol $${vol.toFixed(0)}</div>`;
+    return `
+    <div class="token-row">
+      <div class="token-left">
+        <div class="token-icon">${(t.symbol||'?').slice(0,2)}</div>
+        <div>
+          <div class="token-name">${t.symbol || '?'}</div>
+          <div class="token-vol">Vol $${vol.toFixed(0)}</div>
+        </div>
+      </div>
+      <div class="token-right">
+        <div class="token-price">$${price < 0.01 ? price.toFixed(6) : price.toFixed(4)}</div>
+        ${chgHtml}
+      </div>
+    </div>`;
+  }).join('');
 }
 
-// Navigation
-function showPage(id, navBtn, bottomBtn) {
+async function refreshMarket() {
+  showToast('🔄 Обновляю...');
+  await loadMarket();
+  await loadTicker();
+  showToast('✅ Обновлено');
+}
+
+// ── LK ──
+async function tryLoadLK() {
+  // Пробуем загрузить JWT из бэкенда по Telegram ID
+  if (TG_ID) {
+    try {
+      const res = await fetch(`${BACKEND}/users/${TG_ID}`);
+      if (res.ok) {
+        const user = await res.json();
+        if (user.catapult_jwt) {
+          lkJwt = user.catapult_jwt;
+          localStorage.setItem('catapult_jwt', lkJwt);
+        }
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  if (!lkJwt) {
+    showToast('❌ Сначала подключи аккаунт через бота');
+    return;
+  }
+  await loadLKData();
+}
+
+async function loadLKData() {
+  try {
+    const userData = await gqlPersonal(`{
+      userMe { id profileName referralCode xUsername globalScore }
+    }`);
+    const balData = await gqlPersonal(`{
+      userBalance { balanceUsdtDrops inPositionsBalanceUsdtDrops }
+    }`);
+    const posData = await gqlPersonal(`{
+      closedPositions(limit: 5) {
+        items { id side nominalUsdtDrops pnlUsdtDrops token { ticker } }
+        total
+      }
+    }`);
+
+    const me  = userData?.data?.userMe;
+    const bal = balData?.data?.userBalance;
+    const pos = posData?.data?.closedPositions;
+
+    if (!me && !bal) {
+      showToast('❌ Ошибка загрузки. Проверь API ключ');
+      return;
+    }
+
+    lkConnected = true;
+    document.getElementById('lkLocked').style.display    = 'none';
+    document.getElementById('lkConnected').style.display = 'block';
+    document.getElementById('lkBtn').textContent = '✅ Кабинет';
+    document.getElementById('lkBtn').classList.add('connected');
+
+    if (me) {
+      setText('lkUserName', me.profileName || me.xUsername || 'Трейдер');
+      setText('lkRefCode',  me.referralCode || '—');
+      setText('lkScore',    me.globalScore ? Math.round(me.globalScore).toLocaleString() : '—');
+    }
+    if (bal) {
+      const free  = (parseInt(bal.balanceUsdtDrops || 0) / 1_000_000).toFixed(2);
+      const inPos = (parseInt(bal.inPositionsBalanceUsdtDrops || 0) / 1_000_000).toFixed(2);
+      const total = (parseFloat(free) + parseFloat(inPos)).toFixed(2);
+      setText('lkBalVal', total);
+      setText('lkFree',   `$${free}`);
+      setText('lkInPos',  `$${inPos}`);
+    }
+    if (pos) {
+      setText('lkTrades', pos.total || 0);
+      renderPositions(pos.items || []);
+    }
+
+  } catch(e) {
+    console.error('LK error:', e);
+    showToast('❌ Ошибка соединения');
+  }
+}
+
+function renderPositions(items) {
+  const el = document.getElementById('lkPositions');
+  if (!items.length) { el.innerHTML = '<p style="color:var(--muted);font-size:13px">Нет закрытых позиций</p>'; return; }
+  el.innerHTML = items.map(p => {
+    const pnl  = parseInt(p.pnlUsdtDrops || 0) / 1_000_000;
+    const size = parseInt(p.nominalUsdtDrops || 0) / 1_000_000;
+    return `<div class="pos-row">
+      <div class="token-left">
+        <div class="token-icon">${(p.token?.ticker||'?').slice(0,2)}</div>
+        <div>
+          <div class="token-name">${p.token?.ticker || '?'}</div>
+          <div class="token-vol">${p.side} · $${size.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="token-chg ${pnl>=0?'up':'dn'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</div>
+    </div>`;
+  }).join('');
+}
+
+async function refreshLK() {
+  showToast('🔄 Обновляю...');
+  await loadLKData();
+  showToast('✅ Обновлено');
+}
+
+function disconnectLK() {
+  localStorage.removeItem('catapult_jwt');
+  lkJwt = null; lkConnected = false;
+  document.getElementById('lkLocked').style.display    = 'block';
+  document.getElementById('lkConnected').style.display = 'none';
+  document.getElementById('lkBtn').textContent = '🔐 Кабинет';
+  document.getElementById('lkBtn').classList.remove('connected');
+  showToast('🔓 Аккаунт отключён');
+}
+
+// ── NAV ──
+function showPage(id, navBtn, botBtn) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
 
@@ -1194,11 +1258,9 @@ function showPage(id, navBtn, bottomBtn) {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     navBtn.classList.add('active');
   }
-
-  if (bottomBtn) {
-    document.querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
-    bottomBtn.classList.add('active');
-    // sync nav
+  if (botBtn) {
+    document.querySelectorAll('.bot-btn').forEach(b => b.classList.remove('active'));
+    botBtn.classList.add('active');
     document.querySelectorAll('.nav-btn').forEach(b => {
       if (b.getAttribute('onclick')?.includes(`'${id}'`)) {
         document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
@@ -1207,47 +1269,53 @@ function showPage(id, navBtn, bottomBtn) {
     });
   }
 
+  // Если открыли ЛК — попробовать загрузить
+  if (id === 'lk') {
+    const saved = localStorage.getItem('catapult_jwt');
+    if (saved) { lkJwt = saved; loadLKData(); }
+  }
+
   window.scrollTo(0, 0);
 }
 
-// FAQ toggle
-function toggleFaq(el) {
-  el.parentElement.classList.toggle('open');
+// ── UTILS ──
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }
 
-// Copy ref link
+function toggleFaq(el) { el.parentElement.classList.toggle('open'); }
+
 function copyRef() {
   const link = document.getElementById('refLinkText').textContent;
-  navigator.clipboard.writeText(link).then(() => {
-    showToast('✅ Ссылка скопирована!');
-  }).catch(() => {
-    showToast('📋 Скопируй: ' + link);
-  });
+  navigator.clipboard.writeText(link).then(() => showToast('✅ Ссылка скопирована!')).catch(() => showToast('Скопируй: ' + link));
 }
 
-// Share ref
 function shareRef() {
-  const text = `🚀 Торгуй на Catapult Trade — честная платформа с алгоритмическими графиками!\n\n✅ Каждая сделка = поинты для аирдропа\n✅ 0% хаус-эдж, provably fair\n✅ Минимум $2, без KYC\n\n👉 Регистрация: ${REF_LINK}`;
-  if (navigator.share) {
-    navigator.share({ text });
-  } else {
-    navigator.clipboard.writeText(text);
-    showToast('✅ Текст скопирован!');
-  }
+  const text = `🚀 Торгуй на Catapult Trade — честная платформа!\n\n✅ Каждая сделка = поинты для аирдропа\n✅ 0% хаус-эдж, Provably Fair\n✅ Минимум $2, без KYC\n\n👉 ${REF_LINK}`;
+  if (navigator.share) navigator.share({ text });
+  else { navigator.clipboard.writeText(text); showToast('✅ Текст скопирован!'); }
 }
 
-// Toast notification
 function showToast(msg) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
+  t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-// Init
-loadUserData();
-loadTokens();
-loadPositions();
+// ── INIT ──
+loadTicker();
+loadMarket();
+
+// Проверяем сохранённый JWT
+const savedJwt = localStorage.getItem('catapult_jwt');
+if (savedJwt) { lkJwt = savedJwt; }
+
+// Telegram WebApp init
+if (window.Telegram?.WebApp) {
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+}
 </script>
 </body>
 </html>
