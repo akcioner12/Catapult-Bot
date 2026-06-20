@@ -4,10 +4,11 @@
 - Квиз про Catapult Trade
 - /connect, /disconnect — привязка API ключа Catapult
 - Legacy-флоу квалификации (резервный, /legacy_start)
+- Режим поддержки после викторины — бот продолжает отвечать, когда пользователь
+  возвращается из Mini App с вопросами
 
 ВАЖНО: этот файл слушает MAIN_BOT_TOKEN (@catapulttrade_guide_bot).
 Парсер/одобрение постов живёт в отдельном файле parser.py и слушает PARSER_BOT_TOKEN.
-Логика НЕ менялась — перенесена как есть из старого parser.py.
 """
 
 import os
@@ -166,6 +167,79 @@ async def claude_generate_opening(first_name: str) -> str:
     return f"👋 Привет{f', {first_name}' if first_name else ''}! Расскажи — у тебя есть опыт в крипте или трейдинге?"
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# ── SUPPORT MODE — продолжение диалога ПОСЛЕ викторины (stage = done) ───────
+# ════════════════════════════════════════════════════════════════════════════
+
+SUPPORT_MODE_SYSTEM_PROMPT = """Ты — дружелюбный помощник в Telegram-боте Catapult Trade. Человек уже прошёл знакомство и викторину, увидел ссылку на Mini App.
+
+ТВОЯ ЗАДАЧА СЕЙЧАС:
+Человек может вернуться в бота с любым вопросом — не понял что делать в приложении, не разобрался с регистрацией на платформе, хочет узнать детали, или просто продолжает общаться. Твоя цель — помочь и поддержать разговор, не быть назойливым.
+
+ЧТО ТЫ ЗНАЕШЬ О ПЛАТФОРМЕ И MINI APP:
+- Mini App показывает: бегущую строку токенов, топ роста/падения, общую статистику платформы, разделы "Заработок" и "Стратегии" с объяснениями как работает Catapult, раздел "Рефералы" с реф. ссылкой, и Личный Кабинет (открывается после привязки аккаунта Catapult через API-ключ).
+- Если человек не понимает что делать в приложении — объясни простыми словами: внизу есть вкладки (Главная, Рынок, Заработок, Рефералы, Кабинет), можно просто полистать и почитать про способы заработка, либо сразу перейти на catapult.trade по кнопке "Начать торговать" чтобы зарегистрироваться.
+- Чтобы открыть Личный Кабинет с балансом — нужно зарегистрироваться на catapult.trade, затем в Настройках найти API Key, и привязать его через кнопку "Подключить аккаунт Catapult" в этом боте.
+- Минимальный депозит на платформе $2, без KYC.
+
+СТИЛЬ:
+Живой, короткий, по-дружески. Отвечай конкретно на то что спросили. Если не уверен в технической детали — будь честен, что лучше проверить в самом приложении или на сайте, не выдумывай факты.
+
+Отвечай только текстом следующего сообщения от своего лица."""
+
+
+async def claude_support_reply(history: list) -> str:
+    """Генерирует ответ в режиме поддержки после прохождения викторины."""
+    messages = [{"role": h["role"], "content": h["content"]} for h in history]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 350,
+                    "system": SUPPORT_MODE_SYSTEM_PROMPT,
+                    "messages": messages
+                }
+            )
+            data = resp.json()
+            if "content" in data and data["content"]:
+                return data["content"][0]["text"]
+    except Exception as e:
+        logger.error(f"Support mode Claude error: {e}")
+    return "Расскажи подробнее, что именно непонятно — помогу разобраться!"
+
+
+async def handle_support_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает сообщения от пользователя ПОСЛЕ прохождения викторины (stage=done)."""
+    tg_id = str(update.effective_user.id)
+    user_text = update.message.text.strip()
+
+    state = await get_dialog_state(tg_id)
+    support_history = state.get("support_history", [])
+    support_history.append({"role": "user", "content": user_text})
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    reply = await claude_support_reply(support_history)
+    support_history.append({"role": "assistant", "content": reply})
+
+    state["support_history"] = support_history
+    await save_dialog_state(tg_id, state)
+
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "📱 Открыть приложение", "web_app": {"url": MINIAPP_URL}}],
+            [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
+        ]
+    }
+    await update.message.reply_text(reply, reply_markup=keyboard)
+
+
 async def get_dialog_state(telegram_id: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -174,7 +248,7 @@ async def get_dialog_state(telegram_id: str) -> dict:
                 return resp.json()
     except Exception as e:
         logger.error(f"get_dialog_state error: {e}")
-    return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+    return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0, "support_history": []}
 
 
 async def save_dialog_state(telegram_id: str, state: dict):
@@ -208,7 +282,7 @@ async def send_quiz_question(chat_id: int, step: int):
 async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Обрабатывает свободный текст от пользователя во время прогрева.
-    Вызывается из handle_text, когда не ждём API ключ и не в квизе.
+    Вызывается из handle_text, когда не ждём API ключ.
     """
     user_id = update.effective_user.id
     tg_id = str(user_id)
@@ -216,8 +290,13 @@ async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TY
 
     state = await get_dialog_state(tg_id)
 
-    # Если уже прошёл квиз или сейчас в квизе — не реагируем здесь (квиз отвечает кнопками)
-    if state["stage"] in ("quiz", "done"):
+    # После викторины — отдельный режим поддержки, не игнорируем сообщение
+    if state["stage"] == "done":
+        await handle_support_message(update, context)
+        return
+
+    # Во время самой викторины — кнопки отвечают сами, текст игнорируем
+    if state["stage"] == "quiz":
         return
 
     state["history"].append({"role": "user", "content": user_text})
@@ -312,7 +391,7 @@ async def cmd_reset_dialog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"reset dialog error: {e}")
     await update.message.reply_text("🔄 Окей, начнём с начала! Расскажи — какой у тебя опыт в крипте и трейдинге?")
-    state = {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+    state = {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0, "support_history": []}
     await save_dialog_state(tg_id, state)
 
 
@@ -870,7 +949,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Порядок проверки:
     1) legacy-флоу (ожидание username/calendly из восстановленного bot.py)
     2) ожидание API ключа Catapult
-    3) живой диалог-прогрев (warmup)
+    3) живой диалог-прогрев / режим поддержки после викторины (warmup)
     """
     handled = await handle_legacy_text(update, context)
     if handled:
@@ -916,6 +995,7 @@ async def main():
 
     logger.info("✅ Main user bot (BOT_TOKEN / @catapulttrade_guide_bot) запущен!")
     logger.info("🔑 Catapult Connect: /start, /connect, /disconnect")
+    logger.info("💬 Support mode: продолжение диалога после викторины")
 
     await app.initialize()
     await app.start()
