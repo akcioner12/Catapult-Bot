@@ -1982,7 +1982,7 @@ async def debug_log_all_updates(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def main():
-    app = Application.builder().token(MAIN_BOT_TOKEN).build()
+    app = Application.builder().token(PARSER_BOT_TOKEN).build()
     from telegram.ext import CommandHandler
 
     app.add_error_handler(global_error_handler)
