@@ -62,6 +62,7 @@ WARMUP_SYSTEM_PROMPT = """Ты — живой, обаятельный собес
 - Один акцент за раз — не вываливай несколько вопросов сразу.
 - Используй живую разговорную речь, можно с лёгким сленгом, эмодзи — по чуть-чуть, не через каждое слово.
 - НЕ упоминай Catapult Trade и не давай ссылок, пока сам не решишь что собеседник прогрет.
+- Форматирование: если нужно выделить текст, используй HTML-теги Telegram (<b>текст</b>), НИКОГДА не используй markdown со звёздочками **текст**.
 
 ОТКРЫВАЮЩЕЕ СООБЩЕНИЕ:
 Если это первое сообщение в разговоре (от тебя, до ответа пользователя) — начни с обычного человеческого знакомства, без захода в тему крипты/трейдинга сразу.
@@ -185,6 +186,11 @@ SUPPORT_MODE_SYSTEM_PROMPT = """Ты — дружелюбный помощник
 СТИЛЬ:
 Живой, короткий, по-дружески. Отвечай конкретно на то что спросили. Если не уверен в технической детали — будь честен, что лучше проверить в самом приложении или на сайте, не выдумывай факты.
 
+ФОРМАТИРОВАНИЕ — ТОЛЬКО HTML-теги Telegram, НЕ markdown:
+- жирный текст: <b>текст</b>
+- курсив: <i>текст</i>
+- НИКОГДА не используй звёздочки **текст** — это не сработает в Telegram и будет выглядеть как мусор.
+
 Отвечай только текстом следующего сообщения от своего лица."""
 
 
@@ -237,7 +243,11 @@ async def handle_support_message(update: Update, context: ContextTypes.DEFAULT_T
             [{"text": "🔑 Подключить аккаунт Catapult", "callback_data": "connect_start"}],
         ]
     }
-    await update.message.reply_text(reply, reply_markup=keyboard)
+    try:
+        await update.message.reply_text(reply, parse_mode="HTML", reply_markup=keyboard)
+    except Exception as e:
+        logger.warning(f"HTML parse failed in support reply, sending plain: {e}")
+        await update.message.reply_text(reply, reply_markup=keyboard)
 
 
 async def get_dialog_state(telegram_id: str) -> dict:
@@ -316,7 +326,11 @@ async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TY
 
     if clean_reply:
         state["history"].append({"role": "assistant", "content": history_reply})
-        await update.message.reply_text(clean_reply)
+        try:
+            await update.message.reply_text(clean_reply, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"HTML parse failed in warmup reply, sending plain: {e}")
+            await update.message.reply_text(clean_reply)
 
     if ready_for_quiz:
         state["stage"] = "quiz"
@@ -749,7 +763,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     opening = await claude_generate_opening(first_name)
     state["history"] = [{"role": "assistant", "content": opening}]
     await save_dialog_state(tg_id, state)
-    await update.message.reply_text(opening)
+    try:
+        await update.message.reply_text(opening, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"HTML parse failed in opening message, sending plain: {e}")
+        await update.message.reply_text(opening)
 
 
 async def start_connect_flow(update_or_query, context: ContextTypes.DEFAULT_TYPE):
