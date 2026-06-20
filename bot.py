@@ -12,6 +12,7 @@
 """
 
 import os
+import re
 import asyncio
 import logging
 
@@ -105,6 +106,23 @@ CATAPULT_QUIZ = [
         "options": ["Да, готов попробовать", "Хочу сначала изучить детальнее", "Пока не готов"],
     },
 ]
+
+
+def md_to_html(text: str) -> str:
+    """
+    Подчищает оставшийся markdown на случай если модель его всё же использовала,
+    несмотря на инструкцию писать HTML-тегами. Конвертирует **bold** -> <b>bold</b>
+    и *italic*/_italic_ -> <i>italic</i>. Безопасно даже если текст уже в HTML —
+    не трогает то, что не похоже на markdown-разметку.
+    """
+    if not text:
+        return text
+    # **bold** или __bold__ -> <b>bold</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+    # одиночные *italic* (не часть **) -> <i>italic</i>
+    text = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<i>\1</i>', text)
+    return text
 
 
 async def claude_warmup_reply(history: list) -> str:
@@ -232,6 +250,7 @@ async def handle_support_message(update: Update, context: ContextTypes.DEFAULT_T
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     reply = await claude_support_reply(support_history)
+    reply = md_to_html(reply)
     support_history.append({"role": "assistant", "content": reply})
 
     state["support_history"] = support_history
@@ -323,6 +342,7 @@ async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TY
     history_reply = reply.strip()
     # Пользователю показываем текст без служебных маркеров
     clean_reply = reply.replace("[READY_FOR_QUIZ]", "").replace("[ASKED_PERMISSION]", "").strip()
+    clean_reply = md_to_html(clean_reply)
 
     if clean_reply:
         state["history"].append({"role": "assistant", "content": history_reply})
@@ -761,6 +781,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     first_name = update.effective_user.first_name or ""
     opening = await claude_generate_opening(first_name)
+    opening = md_to_html(opening)
     state["history"] = [{"role": "assistant", "content": opening}]
     await save_dialog_state(tg_id, state)
     try:
