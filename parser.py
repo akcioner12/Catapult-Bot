@@ -1304,6 +1304,7 @@ async def handle_warmup_message(update: Update, context: ContextTypes.DEFAULT_TY
     user_text = update.message.text.strip()
 
     state = await get_dialog_state(tg_id)
+    logger.info(f"🔍 DEBUG handle_warmup_message: tg_id={tg_id} stage={state.get('stage')!r} history_len={len(state.get('history', []))}")
 
     # После викторины — отдельный режим поддержки, не игнорируем сообщение
     if state["stage"] == "done":
