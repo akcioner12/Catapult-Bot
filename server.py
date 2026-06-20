@@ -75,6 +75,7 @@ def init_db():
             stage           TEXT DEFAULT 'chatting',
             quiz_answers    TEXT DEFAULT '[]',
             quiz_step       INTEGER DEFAULT 0,
+            support_history TEXT DEFAULT '[]',
             updated_at      TEXT DEFAULT (datetime('now'))
         );
     """)
@@ -124,6 +125,7 @@ class DialogState(BaseModel):
     stage: str = "chatting"          # chatting | quiz | done
     quiz_answers: list = []
     quiz_step: int = 0
+    support_history: list = []       # история общения после прохождения викторины
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
@@ -136,6 +138,12 @@ async def startup():
         conn.execute("ALTER TABLE users ADD COLUMN catapult_jwt TEXT DEFAULT NULL")
         conn.commit()
         logger.info("Migration: added catapult_jwt column")
+    except Exception:
+        pass  # Поле уже существует
+    try:
+        conn.execute("ALTER TABLE dialogs ADD COLUMN support_history TEXT DEFAULT '[]'")
+        conn.commit()
+        logger.info("Migration: added support_history column")
     except Exception:
         pass  # Поле уже существует
     conn.close()
@@ -318,10 +326,11 @@ async def get_dialog(telegram_id: str):
     row = conn.execute("SELECT * FROM dialogs WHERE telegram_id=?", (telegram_id,)).fetchone()
     conn.close()
     if not row:
-        return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0}
+        return {"history": [], "stage": "chatting", "quiz_answers": [], "quiz_step": 0, "support_history": []}
     d = dict(row)
     d["history"] = json.loads(d["history"])
     d["quiz_answers"] = json.loads(d["quiz_answers"])
+    d["support_history"] = json.loads(d.get("support_history") or "[]")
     return d
 
 @app.post("/dialog/{telegram_id}")
@@ -330,15 +339,17 @@ async def save_dialog(telegram_id: str, data: DialogState):
     existing = conn.execute("SELECT telegram_id FROM dialogs WHERE telegram_id=?", (telegram_id,)).fetchone()
     if existing:
         conn.execute(
-            "UPDATE dialogs SET history=?, stage=?, quiz_answers=?, quiz_step=?, updated_at=datetime('now') WHERE telegram_id=?",
+            "UPDATE dialogs SET history=?, stage=?, quiz_answers=?, quiz_step=?, support_history=?, updated_at=datetime('now') WHERE telegram_id=?",
             (json.dumps(data.history, ensure_ascii=False), data.stage,
-             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step, telegram_id)
+             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step,
+             json.dumps(data.support_history, ensure_ascii=False), telegram_id)
         )
     else:
         conn.execute(
-            "INSERT INTO dialogs (telegram_id, history, stage, quiz_answers, quiz_step) VALUES (?,?,?,?,?)",
+            "INSERT INTO dialogs (telegram_id, history, stage, quiz_answers, quiz_step, support_history) VALUES (?,?,?,?,?,?)",
             (telegram_id, json.dumps(data.history, ensure_ascii=False), data.stage,
-             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step)
+             json.dumps(data.quiz_answers, ensure_ascii=False), data.quiz_step,
+             json.dumps(data.support_history, ensure_ascii=False))
         )
     conn.commit()
     conn.close()
