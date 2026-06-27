@@ -818,6 +818,9 @@ async def evening_generation():
     if crypto_posts:
         text = await generate_post_claude(crypto_posts, "crypto")
         await send_for_approval(text, "crypto", "crypto_1", crypto_posts[0]["channel"], crypto_posts[0]["text"])
+        # Помечаем использованные новости как "отправленные" — чтобы вечерний сбор их не повторил
+        for p in crypto_posts:
+            sent_hashes.add(p["hash"])
         await asyncio.sleep(2)
 
     # 2. Catapult #1 (11:00) — сначала пробуем реальные новости, иначе старый механизм "углов"
