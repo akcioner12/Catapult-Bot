@@ -26,6 +26,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from subagents.tg_monitor import CHANNELS, sent_hashes, collect_top_posts, viral_score
 from subagents.rewriter import CATAPULT_ANGLES, generate_post_claude, generate_catapult_post
 from subagents.image_brief import generate_image_brief
+from subagents.weekly_plan import send_weekly_plan
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -141,45 +142,6 @@ def load_pending():
             logger.info(f"Загружено {len(approved_queue)} approved постов")
     except Exception as e:
         logger.error(f"Load approved error: {e}")
-
-# ── Воскресный контент-план ───────────────────────────────────────────────────
-async def generate_weekly_plan() -> str:
-    prompt = f"""Составь контент-план на неделю для Telegram канала «Крипта, AI, Forex. Как заработать?».
-
-Расписание каждого дня:
-09:00 — Крипта
-11:00 — Catapult Trade
-13:00 — ИИ
-15:00 — Catapult Trade
-16:30 — Опрос
-18:00 — Форекс
-20:00 — Крипта
-
-Напиши план на 7 дней (Пн-Вс). Для каждого поста укажи конкретную тему/идею.
-Формат: день → время → тема одной строкой.
-Используй эмодзи. Без лишних слов."""
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                CLAUDE_API_URL,
-                headers={
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 1500,
-                    "messages": [{"role": "user", "content": prompt}]
-                }
-            )
-            data = resp.json()
-            if "content" in data:
-                return data["content"][0]["text"]
-    except Exception as e:
-        logger.error(f"Weekly plan error: {e}")
-    return "⚠️ Не удалось сгенерировать контент-план."
 
 # ── Клавиатура одобрения ──────────────────────────────────────────────────────
 def approval_keyboard(post_id: str) -> dict:
@@ -642,20 +604,6 @@ async def auto_publish(slot: str):
         logger.info(f"✅ Опубликовано: {slot}")
     except Exception as e:
         logger.error(f"Ошибка публикации {slot}: {e}")
-
-# ── Воскресный контент-план ───────────────────────────────────────────────────
-async def send_weekly_plan():
-    logger.info("=== Воскресный контент-план ===")
-    plan = await generate_weekly_plan()
-    async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
-            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": ADMIN_TG_ID,
-                "text": f"📅 <b>КОНТЕНТ-ПЛАН НА НЕДЕЛЮ</b>\n\n{plan}",
-                "parse_mode": "HTML"
-            }
-        )
 
 # ── Команды модерации (только админ) ──────────────────────────────────────────
 async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1710,7 +1658,10 @@ async def main():
     scheduler.add_job(evening_generation, "cron", hour=20, minute=0)
 
     # Воскресный контент-план в 19:00
-    scheduler.add_job(send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0)
+    scheduler.add_job(
+        send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0,
+        args=[PARSER_BOT_TOKEN, ADMIN_TG_ID]
+    )
 
     # Автопубликация по слотам
     for s in PUBLISH_SCHEDULE:
