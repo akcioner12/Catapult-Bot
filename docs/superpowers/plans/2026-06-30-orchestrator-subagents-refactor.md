@@ -680,12 +680,12 @@ Find the scheduler line that registers the Sunday job (in `main()`):
 grep -n "send_weekly_plan" parser.py
 ```
 
-It currently reads `scheduler.add_job(send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0)`. Change it to pass the now-required arguments via a lambda, matching how `evening_generation`'s job is already wired in this file (check `scheduler.add_job(evening_generation, ...)` — if Task 6 already changed that pattern, match it; otherwise use):
+It currently reads `scheduler.add_job(send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0)`. **Correction (found during implementation of this task):** this file uses `AsyncIOScheduler`, which calls async job functions directly — no lambda or `app.create_task` wrapper is needed or wanted (that pattern is what broke the unrelated, now-abandoned `dirigent-agent` project, which crashed with "no running event loop" on every scheduled run). `PUBLISH_SCHEDULE`'s loop already demonstrates the right way to pass arguments to a scheduled async function — `scheduler.add_job(auto_publish, "cron", hour=s["hour"], minute=s["minute"], args=[s["slot"]])`. Mirror that exact pattern here:
 
 ```python
 scheduler.add_job(
-    lambda: app.create_task(send_weekly_plan(PARSER_BOT_TOKEN, ADMIN_TG_ID)),
-    "cron", day_of_week="sun", hour=19, minute=0
+    send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0,
+    args=[PARSER_BOT_TOKEN, ADMIN_TG_ID]
 )
 ```
 
