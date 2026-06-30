@@ -54,7 +54,7 @@ CHANNELS = {
         "cryptanci", "DeCenter", "cointelegraph"
     ],
     "ai": [
-        "neurobussines", "naebnet", "neyroseti_dr", "loading100ai"
+        "neurobussines", "naebnet", "neyroseti_dr", "loading100ai", "king_ai"
     ],
     "forex": [
         "PROFiInvest", "tradeforexexchange", "premiumgolubev",
