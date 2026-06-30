@@ -24,6 +24,7 @@ from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filt
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from subagents.tg_monitor import CHANNELS, sent_hashes, collect_top_posts, viral_score
+from subagents.rewriter import CATAPULT_ANGLES, generate_post_claude, generate_catapult_post
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,17 +54,6 @@ PUBLISH_SCHEDULE = [
     {"hour": 16, "minute": 30, "slot": "poll"},
     {"hour": 18, "minute": 0,  "slot": "forex"},
     {"hour": 20, "minute": 0,  "slot": "crypto_2"},
-]
-
-# ── Углы для Catapult ─────────────────────────────────────────────────────────
-CATAPULT_ANGLES = [
-    "реферальная программа и заработок на команде",
-    "поинты и токены — выгода раннего входа",
-    "личный опыт — что я уже накопил и заработал",
-    "сравнение с другими платформами — почему Catapult лучше",
-    "инструкция как зарегистрироваться и начать",
-    "результаты команды — цифры и динамика",
-    "ответы на частые вопросы о проекте",
 ]
 
 # ── Темы опросов ──────────────────────────────────────────────────────────────
@@ -150,129 +140,6 @@ def load_pending():
             logger.info(f"Загружено {len(approved_queue)} approved постов")
     except Exception as e:
         logger.error(f"Load approved error: {e}")
-
-# ── Claude API — генерация поста ──────────────────────────────────────────────
-STYLE_GUIDE = """Ты — автор Telegram канала «Крипта, AI, Forex. Как заработать?».
-
-Твой стиль:
-- Начинаешь с 👋 Друзья, ... или 👋 Друзья, всем привет! или 👋 Друзья, приветствую!
-- Каждый абзац начинается с тематического эмодзи
-- Пишешь от первого лица, живо и практично
-- 150-250 слов
-- В конце всегда призыв к действию
-- НЕ копируешь дословно — пересказываешь своими словами
-
-ВАЖНО — форматирование ТОЛЬКО через HTML теги Telegram:
-- жирный: <b>текст</b>
-- курсив: <i>текст</i>
-- цитата: <blockquote>текст</blockquote>
-- НИКАКИХ звёздочек **текст** — это не работает в Telegram!
-- НИКАКОГО markdown форматирования!"""
-
-async def generate_post_claude(posts: list, category: str) -> str:
-    context = {
-        "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi, альткоины",
-        "ai":     "искусственный интеллект, нейросети, AI инструменты для заработка",
-        "forex":  "Forex, валютные пары, трейдинг, аналитика рынка",
-        "catapult": "торговую платформу Catapult Trade — новости, обновления, партнёрства, акции платформы"
-    }
-
-    # Формируем дайджест из всех постов с метриками
-    news_digest = ""
-    for i, p in enumerate(posts, 1):
-        age = ""
-        if p.get("date"):
-            age_hours = round((datetime.utcnow() - p["date"]).total_seconds() / 3600, 1)
-            age = f"⏱{age_hours}ч назад"
-        score = round(viral_score(p), 1)
-        news_digest += (
-            f"\n--- Новость {i} (@{p['channel']} | 👁{p['views']} просмотров | {age} | скор вирусности={score}) ---\n"
-            f"{p['text'][:600]}\n"
-        )
-
-    prompt = f"""{STYLE_GUIDE}
-
-Тема: {context.get(category, 'финансы')}
-
-Ниже {len(posts)} свежих постов за последние 24-48 часов из телеграм каналов по теме {category}.
-У каждого поста указаны: просмотры, возраст и скор вирусности (просмотры/часы — чем выше, тем горячее).
-
-Выбери САМУЮ горячую и резонансную тему — учитывай скор вирусности и свежесть.
-Свежий пост с высоким скором важнее старого с большими просмотрами.
-Напиши на её основе один пост для канала с HTML форматированием (теги: <b>, <i>, <blockquote>).
-НЕ копируй дословно — осмысли и перескажи своими словами.
-
-{news_digest}
-
-{"В конце добавь: 👉 Подробнее в боте: @catapulttrade_guide_bot" if category == "catapult" else "В конце добавь: 💰 Лучший заработок сегодня здесь: @catapulttrade_guide_bot"}
-
-Только готовый пост, без пояснений."""
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                CLAUDE_API_URL,
-                headers={
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 1000,
-                    "messages": [{"role": "user", "content": prompt}]
-                }
-            )
-            data = resp.json()
-            if "content" in data:
-                return data["content"][0]["text"]
-            return text
-    except Exception as e:
-        logger.error(f"Claude error: {e}")
-        return text
-
-# ── Claude API — пост о Catapult ──────────────────────────────────────────────
-async def generate_catapult_post(angle: str) -> str:
-    prompt = f"""{STYLE_GUIDE}
-
-Напиши пост о торговой платформе Catapult Trade.
-
-Угол: {angle}
-
-Факты о Catapult Trade:
-- Торговая платформа где каждая сделка приносит поинты
-- Поинты конвертируются в токены платформы при листинге
-- Проект на ранней стадии — лучший момент для входа
-- Реферальная программа — % от активности команды
-- Бот с подробностями: @catapulttrade_guide_bot
-
-Напиши живой пост от первого лица с HTML форматированием.
-В конце: 🤖 Все подробности → @catapulttrade_guide_bot
-
-Только готовый пост, без пояснений."""
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                CLAUDE_API_URL,
-                headers={
-                    "x-api-key": CLAUDE_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 1000,
-                    "messages": [{"role": "user", "content": prompt}]
-                }
-            )
-            data = resp.json()
-            if "content" in data:
-                return data["content"][0]["text"]
-            return "Пост о Catapult"
-    except Exception as e:
-        logger.error(f"Claude Catapult error: {e}")
-        return "Пост о Catapult"
 
 # ── ТЗ для картинки ───────────────────────────────────────────────────────────
 async def generate_image_brief(post_text: str, category: str) -> str:
