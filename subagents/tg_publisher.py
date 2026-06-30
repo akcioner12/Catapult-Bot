@@ -66,11 +66,11 @@ def save_approved():
         logger.error(f"Save approved error: {e}")
 
 def load_pending():
-    global pending_posts, approved_queue
     try:
         if os.path.exists(PENDING_FILE):
             with open(PENDING_FILE, "r", encoding="utf-8") as f:
-                pending_posts = json.load(f)
+                pending_posts.clear()
+                pending_posts.update(json.load(f))
             logger.info(f"Загружено {len(pending_posts)} pending постов")
     except Exception as e:
         logger.error(f"Load pending error: {e}")

@@ -18,6 +18,9 @@ from subagents.tg_publisher import pending_posts, send_for_approval, approval_ke
 logger = logging.getLogger(__name__)
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
+# Read directly from env (not via subagents.tg_publisher.configure()) because
+# configure() runs later in parser.py's main() — importing these names from
+# tg_publisher here would capture None at import time. Same env vars either way.
 PARSER_BOT_TOKEN = os.getenv("PARSER_BOT_TOKEN")
 ADMIN_TG_ID      = int(os.getenv("ADMIN_TG_ID", "0"))
 
