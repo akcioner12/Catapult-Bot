@@ -33,9 +33,9 @@ pending_posts: dict = {}
 approved_queue: dict = {}
 awaiting_photo: dict = {}
 
-PENDING_FILE  = "/app/pending_posts.json"
-APPROVED_FILE = "/app/approved_queue.json"
-PHOTOS_DIR    = "/app/photos"
+PENDING_FILE  = "/data/pending_posts.json"
+APPROVED_FILE = "/data/approved_queue.json"
+PHOTOS_DIR    = "/data/photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
 PARSER_BOT_TOKEN = None
@@ -95,7 +95,7 @@ def approval_keyboard(post_id: str) -> dict:
     }
 
 # ── Отправка поста на одобрение ───────────────────────────────────────────────
-async def send_for_approval(post_text: str, category: str, slot: str, source: str = "", original: str = ""):
+async def send_for_approval(post_text: str, category: str, slot: str, source: str = "", original: str = "", breaking: bool = False):
     global catapult_angle_idx, poll_idx
 
     post_id = f"{slot}_{hashlib.md5(post_text[:50].encode()).hexdigest()[:8]}"
@@ -110,6 +110,7 @@ async def send_for_approval(post_text: str, category: str, slot: str, source: st
         "slot": slot,
         "source": source,
         "brief": brief,
+        "breaking": breaking,
     }
     save_pending()
 
@@ -122,24 +123,33 @@ async def send_for_approval(post_text: str, category: str, slot: str, source: st
     }
     label = emoji_map.get(category, category.upper())
 
-    time_map = {
-        "crypto_1":   "09:00",
-        "catapult_1": "11:00",
-        "ai":         "13:00",
-        "catapult_2": "15:00",
-        "poll":       "16:30",
-        "forex":      "18:00",
-        "crypto_2":   "20:00",
-    }
-    pub_time = time_map.get(slot, "??:??")
-
-    preview = (
-        f"📌 <b>{label}</b> | публикация завтра в {pub_time}\n"
-        f"{'─' * 28}\n"
-        f"{post_text}\n"
-        f"{'─' * 28}\n"
-        f"🖼 <b>ТЗ для картинки:</b>\n{brief}"
-    )
+    if breaking:
+        preview = (
+            f"🔥 <b>ГОРЯЧАЯ НОВОСТЬ — {label}</b>\n"
+            f"⚡️ Одобри — опубликуется прямо сейчас\n"
+            f"{'─' * 28}\n"
+            f"{post_text}\n"
+            f"{'─' * 28}\n"
+            f"🖼 <b>ТЗ для картинки:</b>\n{brief}"
+        )
+    else:
+        time_map = {
+            "crypto_1":   "09:00",
+            "catapult_1": "11:00",
+            "ai":         "13:00",
+            "catapult_2": "15:00",
+            "poll":       "16:30",
+            "forex":      "18:00",
+            "crypto_2":   "20:00",
+        }
+        pub_time = time_map.get(slot, "??:??")
+        preview = (
+            f"📌 <b>{label}</b> | публикация завтра в {pub_time}\n"
+            f"{'─' * 28}\n"
+            f"{post_text}\n"
+            f"{'─' * 28}\n"
+            f"🖼 <b>ТЗ для картинки:</b>\n{brief}"
+        )
 
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
@@ -184,15 +194,21 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "skipphoto":
         awaiting_photo.pop(ADMIN_TG_ID, None)
-        approved_queue[post["slot"]] = post
-        save_approved()
-        await query.edit_message_text(
-            f"✅ <b>Одобрено без картинки!</b> Пост встал в очередь.\n"
-            f"Публикация: завтра по расписанию 🕐",
-            parse_mode="HTML"
-        )
-        pending_posts.pop(post_id, None)
-        save_pending()
+        if post.get("breaking"):
+            await query.edit_message_text("⚡️ Публикую прямо сейчас...", parse_mode="HTML")
+            pending_posts.pop(post_id, None)
+            save_pending()
+            await publish_now(post)
+        else:
+            approved_queue[post["slot"]] = post
+            save_approved()
+            await query.edit_message_text(
+                f"✅ <b>Одобрено без картинки!</b> Пост встал в очередь.\n"
+                f"Публикация: завтра по расписанию 🕐",
+                parse_mode="HTML"
+            )
+            pending_posts.pop(post_id, None)
+            save_pending()
 
     elif action == "cancel":
         await query.edit_message_text("❌ Пост отменён.")
@@ -301,16 +317,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         awaiting_photo.pop(user_id, None)
 
         # Одобряем пост
-        approved_queue[post["slot"]] = pending_posts[post_id]
-        save_approved()
+        saved_post = pending_posts[post_id]
         pending_posts.pop(post_id, None)
         save_pending()
 
-        await update.message.reply_text(
-            "✅ <b>Картинка сохранена на сервер! Пост встал в очередь.</b>\n"
-            "Публикация: завтра по расписанию 🕐",
-            parse_mode="HTML"
-        )
+        if saved_post.get("breaking"):
+            await update.message.reply_text("⚡️ Публикую прямо сейчас...", parse_mode="HTML")
+            await publish_now(saved_post)
+        else:
+            approved_queue[saved_post["slot"]] = saved_post
+            save_approved()
+            await update.message.reply_text(
+                "✅ <b>Картинка сохранена на сервер! Пост встал в очередь.</b>\n"
+                "Публикация: завтра по расписанию 🕐",
+                parse_mode="HTML"
+            )
     except Exception as e:
         logger.error(f"Photo download error: {e}")
         await update.message.reply_text(f"❌ Ошибка при сохранении картинки: {e}")
@@ -353,6 +374,40 @@ async def handle_admin_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "reply_markup": approval_keyboard(post_id)
             }
         )
+
+# ── Немедленная публикация горячего поста ────────────────────────────────────
+async def publish_now(post: dict):
+    category = post["category"]
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            if post.get("photo_path") and os.path.exists(post["photo_path"]):
+                from telegram import Bot, InputFile
+                main_bot = Bot(token=MAIN_BOT_TOKEN)
+                try:
+                    with open(post["photo_path"], "rb") as photo_file:
+                        await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                    try:
+                        os.remove(post["photo_path"])
+                    except Exception:
+                        pass
+                except Exception as photo_err:
+                    logger.warning(f"publish_now sendPhoto failed: {photo_err}")
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={"chat_id": CHANNEL_ID, "text": post["text"], "parse_mode": "HTML", "disable_web_page_preview": True}
+                )
+            else:
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={"chat_id": CHANNEL_ID, "text": post["text"], "parse_mode": "HTML", "disable_web_page_preview": True}
+                )
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={"chat_id": ADMIN_TG_ID, "text": f"✅ <b>Горячий пост опубликован!</b> [{category.upper()}]", "parse_mode": "HTML"}
+            )
+        logger.info(f"✅ publish_now: {category}")
+    except Exception as e:
+        logger.error(f"publish_now error: {e}")
 
 # ── Автопубликация по расписанию ──────────────────────────────────────────────
 async def auto_publish(slot: str):

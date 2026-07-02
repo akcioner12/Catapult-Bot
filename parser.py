@@ -30,7 +30,7 @@ from subagents.tg_publisher import (
     save_pending, load_pending, handle_approval, handle_photo,
     auto_publish, send_for_approval,
 )
-from orchestrator import evening_generation, PUBLISH_SCHEDULE
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1121,6 +1121,9 @@ async def main():
 
     # Вечерняя генерация каждый день в 20:00
     scheduler.add_job(evening_generation, "cron", hour=20, minute=0)
+
+    # Проверка горячих новостей каждые 2 часа
+    scheduler.add_job(check_breaking_news, "interval", hours=2)
 
     # Воскресный контент-план в 19:00
     scheduler.add_job(

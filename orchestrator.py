@@ -11,7 +11,7 @@ from datetime import datetime
 
 import httpx
 
-from subagents.tg_monitor import collect_top_posts, sent_hashes
+from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
 from subagents.rewriter import generate_post_claude, generate_catapult_post, CATAPULT_ANGLES
 from subagents.tg_publisher import pending_posts, send_for_approval, approval_keyboard
 
@@ -70,6 +70,35 @@ POLL_TOPICS = [
 catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "через день"
+
+# Порог вирусности для немедленной публикации (просмотры / часы).
+# Например: 5000 = пост с 10к просмотров за 2 часа. Увеличь если слишком много ложных тревог.
+BREAKING_SCORE_THRESHOLD = int(os.getenv("BREAKING_SCORE_THRESHOLD", "5000"))
+
+# ── Проверка горячих новостей (каждые 2 часа) ─────────────────────────────────
+async def check_breaking_news():
+    logger.info("=== Проверка горячих новостей ===")
+    for category in ["crypto", "ai", "forex"]:
+        posts = await collect_top_posts(category)
+        if not posts:
+            continue
+        top = posts[0]
+        score = viral_score(top)
+        if score < BREAKING_SCORE_THRESHOLD:
+            logger.info(f"[{category}] Скор {score:.0f} — ниже порога {BREAKING_SCORE_THRESHOLD}, пропускаем")
+            continue
+        if top["hash"] in sent_hashes:
+            logger.info(f"[{category}] Пост уже был отправлен, пропускаем")
+            continue
+        logger.info(f"[{category}] 🔥 Горячая новость! Скор {score:.0f} — генерирую пост")
+        sent_hashes.add(top["hash"])
+        try:
+            text = await generate_post_claude(posts, category)
+            slot = f"breaking_{category}_{int(datetime.utcnow().timestamp())}"
+            await send_for_approval(text, category, slot, top["channel"], top["text"], breaking=True)
+        except Exception as e:
+            logger.error(f"check_breaking_news [{category}] error: {e}")
+        await asyncio.sleep(2)
 
 # ── Вечерняя генерация (20:00) ────────────────────────────────────────────────
 async def evening_generation():
