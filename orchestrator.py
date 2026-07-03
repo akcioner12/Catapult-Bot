@@ -71,11 +71,57 @@ catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "через день"
 
-# Порог вирусности для немедленной публикации (просмотры / часы).
-# Например: 5000 = пост с 10к просмотров за 2 часа. Увеличь если слишком много ложных тревог.
-BREAKING_SCORE_THRESHOLD = int(os.getenv("BREAKING_SCORE_THRESHOLD", "5000"))
+BREAKING_SCORE_THRESHOLD = int(os.getenv("BREAKING_SCORE_THRESHOLD", "20000"))
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 
-# ── Проверка горячих новостей (каждые 2 часа) ─────────────────────────────────
+# ── Семантическая проверка: реально ли новость срочная ────────────────────────
+async def is_truly_breaking(post_text: str) -> bool:
+    """Спрашивает Claude — влияет ли эта новость на рынок ПРЯМО СЕЙЧАС."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 5,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            "Ты анализируешь новость из крипто/форекс/ИИ канала.\n"
+                            "Вопрос: эта новость требует публикации ПРЯМО СЕЙЧАС (в ближайшие 1-2 часа), "
+                            "потому что она влияет на поведение рынка прямо сейчас?\n\n"
+                            "СРОЧНО (публиковать сейчас):\n"
+                            "— Биржа взломана или остановила вывод средств\n"
+                            "— Обвал или рост цены >10% за последний час\n"
+                            "— Регуляторный запрет или арест объявлен сегодня\n"
+                            "— Крупное банкротство или скам раскрыт сегодня\n"
+                            "— Экстренное решение ФРС или центробанка\n\n"
+                            "НЕ СРОЧНО (подождёт до вечера):\n"
+                            "— Кто-то заработал на трейдинге\n"
+                            "— Прогнозы и аналитика\n"
+                            "— Образовательный контент\n"
+                            "— Обычные движения рынка\n"
+                            "— Новости о продуктах и партнёрствах\n\n"
+                            f"Новость:\n{post_text[:600]}\n\n"
+                            "Ответь одним словом: СРОЧНО или ЖДАТЬ"
+                        )
+                    }]
+                }
+            )
+            answer = resp.json()["content"][0]["text"].strip().upper()
+            result = "СРОЧНО" in answer
+            logger.info(f"is_truly_breaking → {answer} → {'ДА' if result else 'НЕТ'}")
+            return result
+    except Exception as e:
+        logger.warning(f"is_truly_breaking error: {e}")
+        return False
+
+# ── Проверка горячих новостей (каждые 3 часа) ─────────────────────────────────
 async def check_breaking_news():
     logger.info("=== Проверка горячих новостей ===")
     for category in ["crypto", "ai", "forex"]:
@@ -90,7 +136,12 @@ async def check_breaking_news():
         if top["hash"] in sent_hashes:
             logger.info(f"[{category}] Пост уже был отправлен, пропускаем")
             continue
-        logger.info(f"[{category}] 🔥 Горячая новость! Скор {score:.0f} — генерирую пост")
+        # Второй фильтр: Claude решает — реально ли это срочно
+        if not await is_truly_breaking(top["text"]):
+            logger.info(f"[{category}] Скор высокий, но Claude решил: не срочно — пропускаем")
+            sent_hashes.add(top["hash"])  # помечаем чтобы не проверять снова
+            continue
+        logger.info(f"[{category}] 🔥 Подтверждена горячая новость! Скор {score:.0f}")
         sent_hashes.add(top["hash"])
         try:
             text = await generate_post_claude(posts, category)
