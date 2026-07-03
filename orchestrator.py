@@ -13,7 +13,9 @@ import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
 from subagents.rewriter import generate_post_claude, generate_catapult_post, CATAPULT_ANGLES
-from subagents.tg_publisher import pending_posts, send_for_approval, approval_keyboard
+from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto
+from subagents.image_brief import generate_image_brief
+from subagents.image_generator import generate_image
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +148,9 @@ async def check_breaking_news():
         try:
             text = await generate_post_claude(posts, category)
             slot = f"breaking_{category}_{int(datetime.utcnow().timestamp())}"
-            await send_for_approval(text, category, slot, top["channel"], top["text"], breaking=True)
+            brief = await generate_image_brief(text, category)
+            photo_path = await generate_image(brief, slot)
+            await publish_now_auto(text, category, slot, brief, photo_path, top["channel"])
         except Exception as e:
             logger.error(f"check_breaking_news [{category}] error: {e}")
         await asyncio.sleep(2)
@@ -166,36 +170,38 @@ async def evening_generation():
             }
         )
 
+    async def _auto_post(text: str, category: str, slot: str, source: str = ""):
+        brief = await generate_image_brief(text, category)
+        photo_path = await generate_image(brief, f"{slot}_{int(datetime.utcnow().timestamp())}")
+        await auto_approve_post(text, category, slot, brief, photo_path, source)
+        await asyncio.sleep(2)
+
     # 1. Крипта #1 (09:00)
     crypto_posts = await collect_top_posts("crypto")
     if crypto_posts:
         text = await generate_post_claude(crypto_posts, "crypto")
-        await send_for_approval(text, "crypto", "crypto_1", crypto_posts[0]["channel"], crypto_posts[0]["text"])
-        # Помечаем использованные новости как "отправленные" — чтобы вечерний сбор их не повторил
+        await _auto_post(text, "crypto", "crypto_1", crypto_posts[0]["channel"])
         for p in crypto_posts:
             sent_hashes.add(p["hash"])
-        await asyncio.sleep(2)
 
-    # 2. Catapult #1 (11:00) — сначала пробуем реальные новости, иначе старый механизм "углов"
+    # 2. Catapult #1 (11:00)
     catapult_posts = await collect_top_posts("catapult")
     if catapult_posts:
         text = await generate_post_claude(catapult_posts, "catapult")
-        await send_for_approval(text, "catapult", "catapult_1", catapult_posts[0]["channel"], catapult_posts[0]["text"])
+        await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"])
     else:
         angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
         catapult_angle_idx += 1
         text = await generate_catapult_post(angle1)
-        await send_for_approval(text, "catapult", "catapult_1")
-    await asyncio.sleep(2)
+        await _auto_post(text, "catapult", "catapult_1")
 
     # 3. ИИ (13:00)
     ai_posts = await collect_top_posts("ai")
     if ai_posts:
         text = await generate_post_claude(ai_posts, "ai")
-        await send_for_approval(text, "ai", "ai", ai_posts[0]["channel"], ai_posts[0]["text"])
-        await asyncio.sleep(2)
+        await _auto_post(text, "ai", "ai", ai_posts[0]["channel"])
 
-    # 5. Опрос (через день — 16:30)
+    # 4. Опрос (через день — 16:30) — авто-одобряем без картинки (это Telegram-опрос)
     global last_poll_date
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
     if last_poll_date != today_str:
@@ -204,59 +210,51 @@ async def evening_generation():
         poll_idx += 1
         poll_text = f"📊 <b>ОПРОС</b>\n\n{poll['question']}\n\n" + "\n".join([f"• {o}" for o in poll['options']])
         poll_id = f"poll_{hashlib.md5(poll['question'].encode()).hexdigest()[:8]}"
-        pending_posts[poll_id] = {
+        approved_queue["poll"] = {
             "text": poll_text,
             "original": poll_text,
             "category": "poll",
             "slot": "poll",
             "source": "",
-            "brief": "Яркая карточка с вопросом, тёмный фон, неоновый текст, 1200x630px.",
+            "brief": "",
             "poll_data": poll,
         }
+        from subagents.tg_publisher import save_approved
+        save_approved()
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
                 f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                 json={
                     "chat_id": ADMIN_TG_ID,
-                    "text": (
-                        f"📌 <b>📊 ОПРОС</b> | публикация завтра в 16:30\n"
-                        f"{'─' * 28}\n"
-                        f"{poll['question']}\n\n"
-                        f"Варианты: {' / '.join(poll['options'])}\n"
-                        f"{'─' * 28}\n"
-                        f"🖼 <b>ТЗ для картинки:</b>\nЯркая карточка с вопросом, тёмный фон, неоновый текст."
-                    ),
+                    "text": f"🤖 <b>Авто-одобрено:</b> 📊 ОПРОС\n📅 Публикация завтра в 16:30\n\n{poll['question']}\nВарианты: {' / '.join(poll['options'])}",
                     "parse_mode": "HTML",
-                    "reply_markup": approval_keyboard(poll_id)
                 }
             )
         await asyncio.sleep(2)
     else:
         logger.info("Опрос сегодня пропущен — был вчера (логика 'через день')")
 
-    # 6. Форекс (18:00)
+    # 5. Форекс (18:00)
     forex_posts = await collect_top_posts("forex")
     if forex_posts:
         text = await generate_post_claude(forex_posts, "forex")
-        await send_for_approval(text, "forex", "forex", forex_posts[0]["channel"], forex_posts[0]["text"])
-        await asyncio.sleep(2)
+        await _auto_post(text, "forex", "forex", forex_posts[0]["channel"])
 
-    # 7. Крипта #2 (20:00) — пересобираем новости отдельно, чтобы не дублировать утренний пост
+    # 6. Крипта #2 (20:00)
     crypto_posts_evening = await collect_top_posts("crypto")
     if crypto_posts_evening:
         text = await generate_post_claude(crypto_posts_evening, "crypto")
-        await send_for_approval(text, "crypto", "crypto_2", crypto_posts_evening[0]["channel"], crypto_posts_evening[0]["text"])
+        await _auto_post(text, "crypto", "crypto_2", crypto_posts_evening[0]["channel"])
     elif crypto_posts:
-        # фоллбэк на утренние посты, если вечерний сбор не дал результатов
         text = await generate_post_claude(crypto_posts, "crypto")
-        await send_for_approval(text, "crypto", "crypto_2", crypto_posts[0]["channel"], crypto_posts[0]["text"])
+        await _auto_post(text, "crypto", "crypto_2", crypto_posts[0]["channel"])
 
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": "✅ <b>Все посты готовы!</b>\n\nОдобри или отредактируй каждый — они опубликуются завтра автоматически по расписанию.",
+                "text": "✅ <b>Все посты подготовлены и одобрены автоматически!</b>\n\nОни опубликуются завтра по расписанию без твоего участия.",
                 "parse_mode": "HTML"
             }
         )

@@ -375,6 +375,58 @@ async def handle_admin_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         )
 
+# ── Авто-одобрение поста (без участия человека) ──────────────────────────────
+async def auto_approve_post(post_text: str, category: str, slot: str, brief: str, photo_path: str = None, source: str = ""):
+    post_id = f"{slot}_{hashlib.md5(post_text[:50].encode()).hexdigest()[:8]}"
+    post = {
+        "text": post_text + CHANNEL_SIGNATURE,
+        "original": post_text,
+        "category": category,
+        "slot": slot,
+        "source": source,
+        "brief": brief,
+    }
+    if photo_path:
+        post["photo_path"] = photo_path
+
+    approved_queue[slot] = post
+    save_approved()
+
+    emoji_map = {"crypto": "🪙 КРИПТА", "ai": "🤖 ИИ", "forex": "💹 ФОРЕКС", "catapult": "💰 CATAPULT TRADE", "poll": "📊 ОПРОС"}
+    time_map = {"crypto_1": "09:00", "catapult_1": "11:00", "ai": "13:00", "catapult_2": "15:00", "poll": "16:30", "forex": "18:00", "crypto_2": "20:00"}
+    label = emoji_map.get(category, category.upper())
+    pub_time = time_map.get(slot, "??:??")
+    photo_status = "🖼 С картинкой" if photo_path else "📝 Без картинки"
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": (
+                    f"🤖 <b>Авто-одобрено:</b> {label}\n"
+                    f"📅 Публикация завтра в {pub_time} | {photo_status}\n"
+                    f"{'─' * 28}\n"
+                    f"{post_text[:300]}..."
+                ),
+                "parse_mode": "HTML",
+            }
+        )
+
+# ── Мгновенная публикация горячей новости (без участия человека) ─────────────
+async def publish_now_auto(post_text: str, category: str, slot: str, brief: str, photo_path: str = None, source: str = ""):
+    from subagents.tg_publisher import CHANNEL_SIGNATURE
+    post = {
+        "text": post_text + CHANNEL_SIGNATURE,
+        "category": category,
+        "slot": slot,
+        "source": source,
+        "brief": brief,
+    }
+    if photo_path:
+        post["photo_path"] = photo_path
+    await publish_now(post)
+
 # ── Немедленная публикация горячего поста ────────────────────────────────────
 async def publish_now(post: dict):
     category = post["category"]
