@@ -94,6 +94,15 @@ def approval_keyboard(post_id: str) -> dict:
         ]]
     }
 
+# ── Клавиатура для уведомлений об авто-одобренных постах (уже в очереди) ─────
+def queue_action_keyboard(slot: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": "👁 Просмотреть полностью", "callback_data": f"qpreview_{slot}"},
+            {"text": "❌ Отменить",               "callback_data": f"qcancel_{slot}"},
+        ]]
+    }
+
 # ── Отправка поста на одобрение ───────────────────────────────────────────────
 async def send_for_approval(post_text: str, category: str, slot: str, source: str = "", original: str = "", breaking: bool = False):
     global catapult_angle_idx, poll_idx
@@ -271,6 +280,41 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
+# ── Обработчик кнопок под уведомлением об авто-одобренном посте ──────────────
+async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    action, slot = query.data.split("_", 1)
+    post = approved_queue.get(slot)
+
+    if not post:
+        await query.edit_message_text("⚠️ Пост не найден в очереди (уже опубликован или отменён).")
+        return
+
+    if action == "qpreview":
+        photo_path = post.get("photo_path")
+        if photo_path and os.path.exists(photo_path):
+            from telegram import Bot, InputFile
+            preview_bot = Bot(token=PARSER_BOT_TOKEN)
+            with open(photo_path, "rb") as photo_file:
+                await preview_bot.send_photo(chat_id=ADMIN_TG_ID, photo=InputFile(photo_file))
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": post["text"],
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                }
+            )
+
+    elif action == "qcancel":
+        approved_queue.pop(slot, None)
+        save_approved()
+        await query.edit_message_text("❌ Пост удалён из очереди.")
+
 # ── Обработчик фото (только админ) ────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -410,6 +454,7 @@ async def auto_approve_post(post_text: str, category: str, slot: str, brief: str
                     f"{post_text[:300]}..."
                 ),
                 "parse_mode": "HTML",
+                "reply_markup": queue_action_keyboard(slot),
             }
         )
 
