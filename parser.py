@@ -1122,8 +1122,8 @@ async def main():
     # Вечерняя генерация каждый день в 20:00
     scheduler.add_job(evening_generation, "cron", hour=20, minute=0)
 
-    # Проверка горячих новостей каждые 3 часа
-    scheduler.add_job(check_breaking_news, "interval", hours=3)
+    # Проверка горячих новостей каждый час
+    scheduler.add_job(check_breaking_news, "interval", hours=1)
 
     # Воскресный контент-план в 19:00
     scheduler.add_job(

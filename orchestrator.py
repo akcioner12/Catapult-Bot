@@ -73,12 +73,11 @@ catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий опрос
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "через день"
 
-BREAKING_SCORE_THRESHOLD = int(os.getenv("BREAKING_SCORE_THRESHOLD", "20000"))
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+BREAKING_MAX_AGE_HOURS = 4  # пост старше 4 часов — уже не горячий
 
-# ── Семантическая проверка: реально ли новость срочная ────────────────────────
+# ── Семантическая проверка: устареет ли новость к завтрашнему утру ────────────
 async def is_truly_breaking(post_text: str) -> bool:
-    """Спрашивает Claude — влияет ли эта новость на рынок ПРЯМО СЕЙЧАС."""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
@@ -94,36 +93,34 @@ async def is_truly_breaking(post_text: str) -> bool:
                     "messages": [{
                         "role": "user",
                         "content": (
-                            "Ты анализируешь новость из крипто/форекс/ИИ канала.\n"
-                            "Вопрос: эта новость требует публикации ПРЯМО СЕЙЧАС (в ближайшие 1-2 часа), "
-                            "потому что она влияет на поведение рынка прямо сейчас?\n\n"
-                            "СРОЧНО (публиковать сейчас):\n"
-                            "— Биржа взломана или остановила вывод средств\n"
-                            "— Обвал или рост цены >10% за последний час\n"
-                            "— Регуляторный запрет или арест объявлен сегодня\n"
-                            "— Крупное банкротство или скам раскрыт сегодня\n"
-                            "— Экстренное решение ФРС или центробанка\n\n"
-                            "НЕ СРОЧНО (подождёт до вечера):\n"
-                            "— Кто-то заработал на трейдинге\n"
-                            "— Прогнозы и аналитика\n"
-                            "— Образовательный контент\n"
-                            "— Обычные движения рынка\n"
-                            "— Новости о продуктах и партнёрствах\n\n"
-                            f"Новость:\n{post_text[:600]}\n\n"
-                            "Ответь одним словом: СРОЧНО или ЖДАТЬ"
+                            "Ты редактор финансового Telegram-канала о крипте, форексе и ИИ.\n"
+                            "Тебе показывают пост из стороннего канала.\n"
+                            "Вопрос: если опубликовать этот пост завтра вечером — читатель почувствует что опоздал, "
+                            "потому что все вокруг уже это обсудили?\n\n"
+                            "ПУБЛИКОВАТЬ СЕЙЧАС — если это:\n"
+                            "— Конкретное событие произошедшее сегодня (заявление политика, решение регулятора, "
+                            "обвал/рост рынка, взлом, банкротство, арест)\n"
+                            "— Новость которую читатель хочет знать СЕЙЧАС чтобы принять решение\n"
+                            "— К завтрашнему утру её уже обсудят везде и она потеряет смысл\n\n"
+                            "ЖДАТЬ ДО ВЕЧЕРА — если это:\n"
+                            "— Аналитика, прогнозы, обучение — не привязаны ко времени\n"
+                            "— Личный успех трейдера, кейс, история\n"
+                            "— Прочитав завтра, читатель не почувствует что опоздал\n\n"
+                            f"Пост:\n{post_text[:700]}\n\n"
+                            "Один ответ: СЕЙЧАС или ЖДАТЬ"
                         )
                     }]
                 }
             )
             answer = resp.json()["content"][0]["text"].strip().upper()
-            result = "СРОЧНО" in answer
+            result = "СЕЙЧАС" in answer
             logger.info(f"is_truly_breaking → {answer} → {'ДА' if result else 'НЕТ'}")
             return result
     except Exception as e:
         logger.warning(f"is_truly_breaking error: {e}")
         return False
 
-# ── Проверка горячих новостей (каждые 3 часа) ─────────────────────────────────
+# ── Проверка горячих новостей (каждый час) ────────────────────────────────────
 async def check_breaking_news():
     logger.info("=== Проверка горячих новостей ===")
     for category in ["crypto", "ai", "forex"]:
@@ -131,19 +128,25 @@ async def check_breaking_news():
         if not posts:
             continue
         top = posts[0]
-        score = viral_score(top)
-        if score < BREAKING_SCORE_THRESHOLD:
-            logger.info(f"[{category}] Скор {score:.0f} — ниже порога {BREAKING_SCORE_THRESHOLD}, пропускаем")
-            continue
+
+        # Пропускаем уже обработанные
         if top["hash"] in sent_hashes:
-            logger.info(f"[{category}] Пост уже был отправлен, пропускаем")
             continue
-        # Второй фильтр: Claude решает — реально ли это срочно
+
+        # Пропускаем посты старше 4 часов — они уже не горячие
+        if top.get("date"):
+            age_hours = (datetime.utcnow() - top["date"]).total_seconds() / 3600
+            if age_hours > BREAKING_MAX_AGE_HOURS:
+                logger.info(f"[{category}] Посту {age_hours:.1f}ч — слишком старый, пропускаем")
+                continue
+
+        # Claude решает: устареет ли к завтрашнему утру?
         if not await is_truly_breaking(top["text"]):
-            logger.info(f"[{category}] Скор высокий, но Claude решил: не срочно — пропускаем")
-            sent_hashes.add(top["hash"])  # помечаем чтобы не проверять снова
+            logger.info(f"[{category}] Claude: не срочно — пропускаем")
+            sent_hashes.add(top["hash"])
             continue
-        logger.info(f"[{category}] 🔥 Подтверждена горячая новость! Скор {score:.0f}")
+
+        logger.info(f"[{category}] 🔥 Горячая новость подтверждена!")
         sent_hashes.add(top["hash"])
         try:
             text = await generate_post_claude(posts, category)
