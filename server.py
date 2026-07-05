@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -37,6 +38,8 @@ MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://your-miniapp.com")
 BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")
 CATAPULT_JWT     = os.getenv("CATAPULT_JWT", "")
 CATAPULT_API     = "https://public-api.catapult.trade/graphql"
+MEDIA_SERVE_TOKEN = os.getenv("MEDIA_SERVE_TOKEN", "")
+MEDIA_DIRS = {"photos": "/data/photos", "audio": "/data/audio"}
 
 # ── База данных ───────────────────────────────────────────────────────────────
 
@@ -434,6 +437,19 @@ async def miniapp_data(ref_code: str):
         "miniapp_url":       f"{MINIAPP_URL}?ref={user['ref_code']}",
         "catapult_ref_link": f"https://catapulttrade.io/register?ref={user['ref_code']}",
     }
+
+@app.get("/media/{kind}/{filename}")
+def get_media(kind: str, filename: str, token: str = ""):
+    if not MEDIA_SERVE_TOKEN or token != MEDIA_SERVE_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    directory = MEDIA_DIRS.get(kind)
+    if not directory:
+        raise HTTPException(status_code=404, detail="Not found")
+    safe_name = os.path.basename(filename)
+    path = os.path.join(directory, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 
