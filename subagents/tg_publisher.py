@@ -38,6 +38,7 @@ CHANNEL_SIGNATURE = """
 pending_posts: dict = {}
 approved_queue: dict = {}
 awaiting_photo: dict = {}
+awaiting_photo_edit: dict = {}  # admin_id -> slot, замена картинки у поста уже в очереди
 
 PENDING_FILE  = "/data/pending_posts.json"
 APPROVED_FILE = "/data/approved_queue.json"
@@ -315,7 +316,8 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "disable_web_page_preview": True,
                     "reply_markup": {
                         "inline_keyboard": [[
-                            {"text": "✏️ Редактировать", "callback_data": f"qedit_{slot}"}
+                            {"text": "✏️ Текст",    "callback_data": f"qedit_{slot}"},
+                            {"text": "🖼 Картинка", "callback_data": f"qeditphoto_{slot}"},
                         ]]
                     },
                 }
@@ -341,6 +343,13 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                 }
             )
 
+    elif action == "qeditphoto":
+        awaiting_photo_edit[ADMIN_TG_ID] = slot
+        await query.edit_message_text(
+            "🖼 <b>Пришли новую картинку для этого поста.</b>\nДля отмены: /cancel",
+            parse_mode="HTML"
+        )
+
     elif action == "qcancel":
         approved_queue.pop(slot, None)
         save_approved()
@@ -350,6 +359,45 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_TG_ID:
+        return
+
+    # Замена картинки у поста, уже стоящего в очереди
+    edit_slot = awaiting_photo_edit.get(user_id)
+    if edit_slot:
+        post = approved_queue.get(edit_slot)
+        if not post:
+            awaiting_photo_edit.pop(user_id, None)
+            await update.message.reply_text("⚠️ Пост не найден в очереди.")
+            return
+
+        await update.message.reply_text("⏳ Скачиваю картинку на сервер...")
+        try:
+            photo = update.message.photo[-1]
+            file_id = photo.file_id
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/getFile",
+                    params={"file_id": file_id}
+                )
+                file_path = resp.json()["result"]["file_path"]
+                file_resp = await client.get(
+                    f"https://api.telegram.org/file/bot{PARSER_BOT_TOKEN}/{file_path}"
+                )
+                local_path = f"{PHOTOS_DIR}/{edit_slot}.jpg"
+                with open(local_path, "wb") as f:
+                    f.write(file_resp.content)
+
+            approved_queue[edit_slot]["photo_path"] = local_path
+            save_approved()
+            awaiting_photo_edit.pop(user_id, None)
+            await update.message.reply_text(
+                "✅ <b>Картинка обновлена!</b>",
+                parse_mode="HTML",
+                reply_markup=queue_action_keyboard(edit_slot)
+            )
+        except Exception as e:
+            logger.error(f"Photo edit error: {e}")
+            await update.message.reply_text(f"❌ Ошибка при сохранении картинки: {e}")
         return
 
     post_id = awaiting_photo.get(user_id)
@@ -418,6 +466,7 @@ async def handle_admin_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "/cancel":
         editing_post.pop(user_id, None)
         awaiting_photo.pop(user_id, None)
+        awaiting_photo_edit.pop(user_id, None)
         await update.message.reply_text("✅ Отменено.")
         return
 
