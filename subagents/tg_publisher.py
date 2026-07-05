@@ -7,6 +7,7 @@ parser.py. No logic changed, only relocated.
 """
 import os
 import re
+import html
 import json
 import random
 import logging
@@ -349,6 +350,19 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             "🖼 <b>Пришли новую картинку для этого поста.</b>\nДля отмены: /cancel",
             parse_mode="HTML"
         )
+        brief = post.get("brief") or "(ТЗ не найдено для этого поста)"
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": (
+                        "📋 <b>ТЗ для этой картинки</b> (скопируй и вставь в Adobe/Midjourney/etc):\n\n"
+                        f"<code>{html.escape(brief)}</code>"
+                    ),
+                    "parse_mode": "HTML",
+                }
+            )
 
     elif action == "qcancel":
         approved_queue.pop(slot, None)
