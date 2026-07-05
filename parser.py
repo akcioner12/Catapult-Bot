@@ -28,7 +28,7 @@ import subagents.tg_publisher as tg_publisher
 from subagents.tg_publisher import (
     pending_posts, approved_queue, awaiting_photo, editing_post,
     save_pending, load_pending, handle_approval, handle_photo,
-    auto_publish, send_for_approval, handle_queue_action,
+    auto_publish, send_for_approval, handle_queue_action, preview_text,
 )
 from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE
 
@@ -128,7 +128,7 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "✅ <b>Одобрены и ждут публикации:</b>\n\n"
         for slot, post in approved_queue.items():
             label = time_map.get(slot, slot)
-            preview = post["text"][:100].replace("\n", " ")
+            preview = preview_text(post["text"], 100).replace("\n", " ")
             photo = "📎" if (post.get("photo_path") or post.get("photo_id")) else "📝"
             text += f"{photo} {label}\n<i>{preview}...</i>\n\n"
     else:
@@ -1088,7 +1088,7 @@ async def main():
     parser_app.add_handler(CommandHandler("test_publish", cmd_test_publish))
     parser_app.add_handler(CommandHandler("test_generate", cmd_test_generate))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
-    parser_app.add_handler(CallbackQueryHandler(handle_queue_action, pattern="^(qpreview|qcancel)_"))
+    parser_app.add_handler(CallbackQueryHandler(handle_queue_action, pattern="^(qpreview|qcancel|qedit)_"))
     parser_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
     parser_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_TG_ID), handle_edit_message))
 

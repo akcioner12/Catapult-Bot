@@ -6,6 +6,7 @@ dispatcher; the dispatcher itself (and its non-admin branch) stays in
 parser.py. No logic changed, only relocated.
 """
 import os
+import re
 import json
 import random
 import logging
@@ -19,6 +20,11 @@ from subagents.image_brief import generate_image_brief
 from subagents.rewriter import generate_catapult_post, generate_post_claude, CATAPULT_ANGLES
 
 logger = logging.getLogger(__name__)
+
+# ── Безопасное превью с обрезкой текста ───────────────────────────────────────
+def preview_text(text: str, length: int) -> str:
+    """Обрезка для превью с parse_mode=HTML — снимает теги, чтобы срез не порвал тег пополам."""
+    return re.sub(r"<[^>]+>", "", text)[:length]
 
 # ── Подпись канала ────────────────────────────────────────────────────────────
 CHANNEL_SIGNATURE = """
@@ -269,7 +275,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "text": (
                             f"🔄 <b>Новый вариант:</b>\n"
                             f"{'─' * 28}\n"
-                            f"{new_text[:600]}\n"
+                            f"{preview_text(new_text, 600)}\n"
                             f"{'─' * 28}\n"
                             f"🖼 <b>ТЗ для картинки:</b>\n{new_brief}"
                         ),
@@ -307,6 +313,31 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "text": post["text"],
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
+                    "reply_markup": {
+                        "inline_keyboard": [[
+                            {"text": "✏️ Редактировать", "callback_data": f"qedit_{slot}"}
+                        ]]
+                    },
+                }
+            )
+
+    elif action == "qedit":
+        editing_post[ADMIN_TG_ID] = f"queue:{slot}"
+        await query.edit_message_text(
+            "✏️ <b>Режим редактирования</b>\nПришли исправленный текст. Для отмены: /cancel",
+            parse_mode="HTML"
+        )
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": (
+                        f"📋 <b>Полный текст поста — скопируй и отредактируй:</b>\n"
+                        f"{'─' * 28}\n\n"
+                        f"{post['text']}"
+                    ),
+                    "parse_mode": "HTML",
                 }
             )
 
@@ -390,17 +421,43 @@ async def handle_admin_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Отменено.")
         return
 
-    post_id = editing_post.get(user_id)
-    if not post_id:
+    target = editing_post.get(user_id)
+    if not target:
         return
 
+    new_text = update.message.text
+
+    if target.startswith("queue:"):
+        slot = target[len("queue:"):]
+        post = approved_queue.get(slot)
+        if not post:
+            await update.message.reply_text("⚠️ Пост не найден в очереди.")
+            editing_post.pop(user_id, None)
+            return
+
+        approved_queue[slot]["text"] = new_text + CHANNEL_SIGNATURE
+        editing_post.pop(user_id, None)
+        save_approved()
+
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": f"✅ <b>Текст обновлён!</b>\n\n{preview_text(new_text, 600)}",
+                    "parse_mode": "HTML",
+                    "reply_markup": queue_action_keyboard(slot)
+                }
+            )
+        return
+
+    post_id = target
     post = pending_posts.get(post_id)
     if not post:
         await update.message.reply_text("⚠️ Пост не найден.")
         editing_post.pop(user_id, None)
         return
 
-    new_text = update.message.text
     pending_posts[post_id]["text"] = new_text + CHANNEL_SIGNATURE
     editing_post.pop(user_id, None)
 
@@ -411,7 +468,7 @@ async def handle_admin_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "chat_id": ADMIN_TG_ID,
                 "text": (
                     f"✅ <b>Текст обновлён!</b>\n\n"
-                    f"{new_text[:600]}\n\n"
+                    f"{preview_text(new_text, 600)}\n\n"
                     f"🖼 <b>ТЗ для картинки:</b>\n{post['brief']}"
                 ),
                 "parse_mode": "HTML",
@@ -451,7 +508,7 @@ async def auto_approve_post(post_text: str, category: str, slot: str, brief: str
                     f"🤖 <b>Авто-одобрено:</b> {label}\n"
                     f"📅 Публикация завтра в {pub_time} | {photo_status}\n"
                     f"{'─' * 28}\n"
-                    f"{post_text[:300]}..."
+                    f"{preview_text(post_text, 300)}..."
                 ),
                 "parse_mode": "HTML",
                 "reply_markup": queue_action_keyboard(slot),
