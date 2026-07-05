@@ -316,7 +316,9 @@ async def handle_queue_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                     "reply_markup": {
-                        "inline_keyboard": [[
+                        "inline_keyboard": [
+                            [{"text": "🖼 Картинка", "callback_data": f"qeditphoto_{slot}"}]
+                        ] if post.get("category") == "poll" else [[
                             {"text": "✏️ Текст",    "callback_data": f"qedit_{slot}"},
                             {"text": "🖼 Картинка", "callback_data": f"qeditphoto_{slot}"},
                         ]]
@@ -640,6 +642,18 @@ async def auto_publish(slot: str):
         async with httpx.AsyncClient(timeout=15) as client:
             if category == "poll" and "poll_data" in post:
                 poll_data = post["poll_data"]
+                if post.get("photo_path") and os.path.exists(post["photo_path"]):
+                    from telegram import Bot, InputFile
+                    main_bot = Bot(token=MAIN_BOT_TOKEN)
+                    try:
+                        with open(post["photo_path"], "rb") as photo_file:
+                            await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                        try:
+                            os.remove(post["photo_path"])
+                        except Exception:
+                            pass
+                    except Exception as photo_err:
+                        logger.warning(f"poll sendPhoto failed: {photo_err}")
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPoll",
                     json={

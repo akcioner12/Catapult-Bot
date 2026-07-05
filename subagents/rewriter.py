@@ -3,6 +3,7 @@ Sub-agent: переделка найденного контента "под св
 Перенесено из parser.py без изменения логики.
 """
 import os
+import re
 import logging
 from datetime import datetime
 
@@ -149,3 +150,60 @@ async def generate_catapult_post(angle: str) -> str:
     except Exception as e:
         logger.error(f"Claude Catapult error: {e}")
         return "Пост о Catapult"
+
+# ── Claude API — генерация опроса ──────────────────────────────────────────────
+async def generate_poll(recent_questions: list) -> dict | None:
+    """Придумывает новый опрос (вопрос + варианты) на тему крипты/форекса/ИИ/Catapult.
+    Возвращает None при сбое — вызывающий код падает обратно на статический список."""
+    avoid = "\n".join(f"- {q}" for q in recent_questions[-15:]) if recent_questions else "(пока нет истории)"
+    prompt = f"""Ты придумываешь опросы (голосования) для Telegram-канала о крипте, форексе, ИИ-заработке и платформе Catapult Trade.
+
+Придумай ОДИН новый опрос на любую из этих тем — сам выбери, что сейчас интереснее аудитории.
+
+Требования:
+- Вопрос живой и цепляющий, не банальный ("как дела" не подходит) — про конкретные привычки, стратегии, мнения, страхи или опыт аудитории в трейдинге/крипте/заработке с ИИ.
+- Ровно 4 коротких варианта ответа (2-5 слов каждый).
+- НЕ повторяй и не перефразируй уже использованные вопросы (список ниже) — придумай реально новый угол:
+{avoid}
+
+Ответь СТРОГО в этом формате, без пояснений:
+ВОПРОС: <текст вопроса с эмодзи в начале>
+1. <вариант>
+2. <вариант>
+3. <вариант>
+4. <вариант>"""
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 300,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            text = data["content"][0]["text"]
+            question = ""
+            options = []
+            for line in text.strip().split("\n"):
+                line = line.strip()
+                if line.upper().startswith("ВОПРОС:"):
+                    question = line.split(":", 1)[1].strip()
+                    continue
+                m = re.match(r"^\d+[.\)]\s*(.+)", line)
+                if m:
+                    options.append(m.group(1).strip())
+            if question and len(options) >= 2:
+                return {"question": question, "options": options[:10]}
+            logger.warning(f"generate_poll: не удалось распарсить ответ: {text[:200]}")
+            return None
+    except Exception as e:
+        logger.error(f"generate_poll error: {e}")
+        return None

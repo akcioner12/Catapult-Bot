@@ -30,7 +30,7 @@ from subagents.tg_publisher import (
     save_pending, load_pending, handle_approval, handle_photo,
     auto_publish, send_for_approval, handle_queue_action, preview_text,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1150,6 +1150,7 @@ async def main():
     logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
 
     load_pending()
+    load_poll_state()
 
     await parser_app.initialize()
     await parser_app.start()

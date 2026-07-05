@@ -4,16 +4,16 @@ approval для контент-пайплайна Telegram. Перенесено
 evening_generation) без изменения логики.
 """
 import os
+import json
 import asyncio
-import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, date
 
 import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
-from subagents.rewriter import generate_post_claude, generate_catapult_post, CATAPULT_ANGLES
-from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto
+from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES
+from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
 
@@ -36,7 +36,7 @@ PUBLISH_SCHEDULE = [
     {"hour": 20, "minute": 0,  "slot": "crypto_2"},
 ]
 
-# ── Темы опросов ──────────────────────────────────────────────────────────────
+# ── Темы опросов (fallback, если генерация через Claude не удалась) ───────────
 POLL_TOPICS = [
     {
         "question": "💰 Во что инвестируешь прямо сейчас?",
@@ -70,11 +70,33 @@ POLL_TOPICS = [
 
 # ── Состояние ─────────────────────────────────────────────────────────────────
 catapult_angle_idx: int = 0   # текущий угол Catapult
-poll_idx: int = 0             # текущий опрос
-last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "через день"
+poll_idx: int = 0             # текущий fallback-опрос (если генерация не удалась)
+last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "раз в 2 дня"
+recent_poll_questions: list = []  # последние заданные вопросы — чтобы Claude не повторялся
 
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 BREAKING_MAX_AGE_HOURS = 4  # пост старше 4 часов — уже не горячий
+
+# ── Персистентность состояния опроса (переживает рестарты контейнера) ────────
+POLL_STATE_FILE = "/data/poll_state.json"
+
+def load_poll_state():
+    global last_poll_date
+    try:
+        if os.path.exists(POLL_STATE_FILE):
+            with open(POLL_STATE_FILE, "r", encoding="utf-8") as f:
+                state = json.load(f)
+                last_poll_date = state.get("last_poll_date", "")
+                recent_poll_questions[:] = state.get("recent_questions", [])
+    except Exception as e:
+        logger.error(f"Load poll state error: {e}")
+
+def save_poll_state():
+    try:
+        with open(POLL_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_poll_date": last_poll_date, "recent_questions": recent_poll_questions}, f, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Save poll state error: {e}")
 
 # ── Семантическая проверка: устареет ли новость к завтрашнему утру ────────────
 async def is_truly_breaking(post_text: str) -> bool:
@@ -258,38 +280,61 @@ async def evening_generation():
         text = await generate_post_claude(ai_posts, "ai")
         await _auto_post(text, "ai", "ai", ai_posts[0]["channel"])
 
-    # 4. Опрос (через день — 16:30) — авто-одобряем без картинки (это Telegram-опрос)
+    # 4. Опрос (раз в 2 дня — 16:30) — авто-одобряем, с картинкой
     global last_poll_date
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
-    if last_poll_date != today_str:
-        last_poll_date = today_str
-        poll = POLL_TOPICS[poll_idx % len(POLL_TOPICS)]
-        poll_idx += 1
+    today = datetime.utcnow().date()
+    last_date = None
+    if last_poll_date:
+        try:
+            last_date = date.fromisoformat(last_poll_date)
+        except ValueError:
+            last_date = None
+
+    if last_date is None or (today - last_date).days >= 2:
+        last_poll_date = today.isoformat()
+        poll = await generate_poll(recent_poll_questions)
+        if not poll:
+            poll = POLL_TOPICS[poll_idx % len(POLL_TOPICS)]
+            poll_idx += 1
+        recent_poll_questions.append(poll["question"])
+        del recent_poll_questions[:-20]
+        save_poll_state()
+
         poll_text = f"📊 <b>ОПРОС</b>\n\n{poll['question']}\n\n" + "\n".join([f"• {o}" for o in poll['options']])
-        poll_id = f"poll_{hashlib.md5(poll['question'].encode()).hexdigest()[:8]}"
+        brief = await generate_image_brief(poll["question"], "poll")
+        photo_path = await generate_image(brief, f"poll_{int(datetime.utcnow().timestamp())}")
+
         approved_queue["poll"] = {
             "text": poll_text,
             "original": poll_text,
             "category": "poll",
             "slot": "poll",
             "source": "",
-            "brief": "",
+            "brief": brief,
+            "photo_path": photo_path,
             "poll_data": poll,
         }
         from subagents.tg_publisher import save_approved
         save_approved()
+        photo_status = "🖼 С картинкой" if photo_path else "📝 Без картинки"
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
                 f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                 json={
                     "chat_id": ADMIN_TG_ID,
-                    "text": f"🤖 <b>Авто-одобрено:</b> 📊 ОПРОС\n📅 Публикация завтра в 16:30\n\n{poll['question']}\nВарианты: {' / '.join(poll['options'])}",
+                    "text": (
+                        f"🤖 <b>Авто-одобрено:</b> 📊 ОПРОС\n"
+                        f"📅 Публикация завтра в 16:30 | {photo_status}\n\n"
+                        f"{poll['question']}\nВарианты: {' / '.join(poll['options'])}"
+                    ),
                     "parse_mode": "HTML",
+                    "reply_markup": queue_action_keyboard("poll"),
                 }
             )
         await asyncio.sleep(2)
     else:
-        logger.info("Опрос сегодня пропущен — был вчера (логика 'через день')")
+        days_left = 2 - (today - last_date).days
+        logger.info(f"Опрос пропущен — последний был {last_poll_date}, следующий через {days_left} дн.")
 
     # 5. Форекс (18:00)
     forex_posts = await collect_top_posts("forex")
