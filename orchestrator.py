@@ -89,7 +89,7 @@ async def is_truly_breaking(post_text: str) -> bool:
                 },
                 json={
                     "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 5,
+                    "max_tokens": 12,
                     "messages": [{
                         "role": "user",
                         "content": (
@@ -124,10 +124,53 @@ async def is_truly_breaking(post_text: str) -> bool:
         logger.warning(f"is_truly_breaking error: {e}")
         return False
 
+# ── Семантическая проверка: есть ли у поста Catapult ограниченное окно/дедлайн ─
+async def is_catapult_urgent(post_text: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 12,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            "Ты редактор Telegram-канала, продвигающего платформу Catapult Trade через реферальную программу.\n"
+                            "Тебе показывают пост из официального канала Catapult Trade.\n"
+                            "Вопрос: если опубликовать этот пост только завтра вечером — читатель упустит реальную возможность или дедлайн?\n\n"
+                            "ПУБЛИКОВАТЬ СЕЙЧАС — если пост объявляет:\n"
+                            "— Ограниченное по времени окно доступа (whitelist, early access, pre-sale)\n"
+                            "— Конкретный дедлайн или обратный отсчёт (часы/дни до события)\n"
+                            "— Старт или окончание продажи токена, листинга, акции\n"
+                            "— Любое \"успей/только сейчас/осталось N часов\"\n\n"
+                            "ЖДАТЬ ДО ВЕЧЕРА — если это:\n"
+                            "— Общие новости о партнёрствах, обновлениях продукта без дедлайна\n"
+                            "— Аналитика, статистика, отчёты\n"
+                            "— Обычные образовательные/маркетинговые посты без временного окна\n\n"
+                            f"Пост:\n{post_text[:700]}\n\n"
+                            "Один ответ: СЕЙЧАС или ЖДАТЬ"
+                        )
+                    }]
+                }
+            )
+            answer = resp.json()["content"][0]["text"].strip().upper()
+            result = "СЕЙЧАС" in answer
+            logger.info(f"is_catapult_urgent → {answer} → {'ДА' if result else 'НЕТ'}")
+            return result
+    except Exception as e:
+        logger.warning(f"is_catapult_urgent error: {e}")
+        return False
+
 # ── Проверка горячих новостей (каждый час) ────────────────────────────────────
 async def check_breaking_news():
     logger.info("=== Проверка горячих новостей ===")
-    for category in ["crypto", "ai", "forex"]:
+    for category in ["crypto", "ai", "forex", "catapult"]:
         posts = await collect_top_posts(category)
         if not posts:
             continue
@@ -144,8 +187,9 @@ async def check_breaking_news():
                 logger.info(f"[{category}] Посту {age_hours:.1f}ч — слишком старый, пропускаем")
                 continue
 
-        # Claude решает: устареет ли к завтрашнему утру?
-        if not await is_truly_breaking(top["text"]):
+        # Claude решает: срочно ли публиковать (свой критерий для catapult)
+        is_urgent = await is_catapult_urgent(top["text"]) if category == "catapult" else await is_truly_breaking(top["text"])
+        if not is_urgent:
             logger.info(f"[{category}] Claude: не срочно — пропускаем")
             sent_hashes.add(top["hash"])
             continue
