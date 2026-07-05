@@ -101,10 +101,11 @@ async def generate_post_claude(posts: list, category: str) -> str:
             data = resp.json()
             if "content" in data:
                 return data["content"][0]["text"]
-            return text
+            logger.error(f"Claude error: {data}")
+            return ""
     except Exception as e:
         logger.error(f"Claude error: {e}")
-        return text
+        return ""
 
 # ── Claude API — пост о Catapult ──────────────────────────────────────────────
 async def generate_catapult_post(angle: str) -> str:

@@ -154,6 +154,9 @@ async def check_breaking_news():
         sent_hashes.add(top["hash"])
         try:
             text = await generate_post_claude(posts, category)
+            if not text:
+                logger.warning(f"[{category}] Пустой текст поста — пропускаем (сбой генерации)")
+                continue
             slot = f"breaking_{category}_{int(datetime.utcnow().timestamp())}"
             brief = await generate_image_brief(text, category)
             photo_path = await generate_image(brief, slot)
@@ -178,6 +181,9 @@ async def evening_generation():
         )
 
     async def _auto_post(text: str, category: str, slot: str, source: str = ""):
+        if not text:
+            logger.warning(f"[{slot}] Пустой текст поста — пропускаем (сбой генерации)")
+            return
         brief = await generate_image_brief(text, category)
         photo_path = await generate_image(brief, f"{slot}_{int(datetime.utcnow().timestamp())}")
         await auto_approve_post(text, category, slot, brief, photo_path, source)
