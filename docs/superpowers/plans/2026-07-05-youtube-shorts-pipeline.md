@@ -1398,7 +1398,320 @@ git commit -m "feat: wire YouTube Shorts pipeline into parser.py (commands, hand
 
 ---
 
-### Task 11: End-to-end manual verification
+## Addendum (post-merge-review): direct upload path for self-recorded videos
+
+**Why:** the self-record path (Task 7/9's `handle_video_file`) receives the video via a Telegram video *message*, which requires the bot to call Telegram's `getFile` to download it — and `getFile` refuses files over **20MB**, a hard limit of the cloud Bot API unrelated to how large a file Telegram will let a user *send*. A typical 30-60s 1080p phone clip is usually under 20MB, but not always (4K, high bitrate, longer clips). Rather than standing up a full self-hosted Local Bot API server (real infra, out of scope), the user chose to add a second, parallel path: a simple authenticated upload page on the already-public `server.py`, so a large clip can be uploaded via ordinary HTTP instead of through Telegram's file-download ceiling. **The existing Telegram-video-message path is kept as-is** (still fine for small clips) — this only adds an alternative for large ones.
+
+**Design:** `propose_self_record_script()` now also mints a single-use, high-entropy upload token (`secrets.token_urlsafe(16)`) and includes an upload link in its Telegram message. `server.py` gets `GET/POST /upload/{token}` — a plain HTML form, no JS — that saves the uploaded bytes to `/data/videos/` and appends a small record to a queue file. Critically, **`server.py` (the `web` process) never touches `pending_videos`/`approved_videos` directly** — those stay single-writer, owned only by the `parser` process, to avoid a cross-process in-memory/disk desync (the `parser` process's `pending_videos` dict is loaded once at startup and only ever mutated from within that same process; if `server.py` wrote to it directly, `parser`'s in-memory copy would silently miss the new entry until a restart). Instead, `server.py` only reads/writes two new disk-file "mailboxes" (`upload_tokens.json`, `pending_uploads.json`) that have no persistent in-memory cache — every access re-reads/rewrites the file directly — and a new `parser`-side polling job (`process_self_record_uploads`, every 1 minute) drains `pending_uploads.json` and does the actual `generate_video_metadata` → `send_video_for_approval` work, entirely inside the `parser` process. This mirrors the existing project pattern of plain-JSON-file state with no locking (acceptable here: one admin, uploads are rare, the collision window between a poll and a concurrent upload is a few milliseconds at most).
+
+**New dependency:** `python-multipart` (required by FastAPI/Starlette to parse `UploadFile` form uploads) — not previously in `requirements.txt`.
+
+---
+
+### Task 11: Upload-token queue in `subagents/yt_publisher.py`
+
+**Files:**
+- Modify: `subagents/yt_publisher.py`
+
+**Interfaces:**
+- Produces: `create_upload_token(topic: str, script: str, category: str) -> str`, `get_upload_token_info(token: str) -> dict | None`, `consume_upload_token(token: str, video_path: str) -> bool`, `pop_pending_uploads() -> list`.
+- Consumes: nothing new — pure file-based, no `configure()` dependency (so `server.py`, a separate process that never calls `yt_publisher.configure()`, can safely call these four functions).
+
+- [ ] **Step 1: Add to `subagents/yt_publisher.py`**
+
+Add `import secrets` alongside the existing `import time` at the top. Add near the other `*_FILE` constants (after `APPROVED_FILE`):
+
+```python
+UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
+PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
+```
+
+Add at the end of the file:
+
+```python
+# ── Токены загрузки для самозаписи (обходим лимит getFile в 20МБ) ───────────
+def _read_json_file(path: str, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Read {path} error: {e}")
+    return default
+
+def _write_json_file(path: str, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Write {path} error: {e}")
+
+def create_upload_token(topic: str, script: str, category: str) -> str:
+    token = secrets.token_urlsafe(16)
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    tokens[token] = {"topic": topic, "script": script, "category": category}
+    _write_json_file(UPLOAD_TOKENS_FILE, tokens)
+    return token
+
+def get_upload_token_info(token: str) -> dict | None:
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    return tokens.get(token)
+
+def consume_upload_token(token: str, video_path: str) -> bool:
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    info = tokens.pop(token, None)
+    if not info:
+        return False
+    _write_json_file(UPLOAD_TOKENS_FILE, tokens)
+
+    uploads = _read_json_file(PENDING_UPLOADS_FILE, [])
+    uploads.append({
+        "video_path": video_path,
+        "topic": info["topic"],
+        "script": info["script"],
+        "category": info["category"],
+    })
+    _write_json_file(PENDING_UPLOADS_FILE, uploads)
+    return True
+
+def pop_pending_uploads() -> list:
+    uploads = _read_json_file(PENDING_UPLOADS_FILE, [])
+    _write_json_file(PENDING_UPLOADS_FILE, [])
+    return uploads
+```
+
+- [ ] **Step 2: Manual verification**
+
+```bash
+.venv/Scripts/python.exe -c "
+from subagents.yt_publisher import create_upload_token, get_upload_token_info, consume_upload_token, pop_pending_uploads
+t = create_upload_token('topic', 'script', 'crypto')
+assert get_upload_token_info(t) == {'topic': 'topic', 'script': 'script', 'category': 'crypto'}
+assert consume_upload_token(t, '/data/videos/x.mp4') is True
+assert get_upload_token_info(t) is None, 'token must be single-use'
+assert consume_upload_token(t, '/data/videos/x.mp4') is False, 'second consume must fail'
+uploads = pop_pending_uploads()
+assert uploads == [{'video_path': '/data/videos/x.mp4', 'topic': 'topic', 'script': 'script', 'category': 'crypto'}], uploads
+assert pop_pending_uploads() == [], 'must be drained after pop'
+print('OK')
+"
+```
+
+Expected: prints `OK`, no assertion errors.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add subagents/yt_publisher.py
+git commit -m "feat: add upload-token queue to yt_publisher for direct video uploads"
+```
+
+---
+
+### Task 12: Upload endpoint in `server.py`
+
+**Files:**
+- Modify: `server.py`
+- Modify: `requirements.txt` (add `python-multipart`)
+
+**Interfaces:**
+- Produces: `GET /upload/{token}` (HTML form or "invalid link" page), `POST /upload/{token}` (accepts the file, saves it, calls `yt_publisher.consume_upload_token`).
+- Consumes: `subagents.yt_publisher.get_upload_token_info`/`consume_upload_token` (Task 11).
+
+- [ ] **Step 1: Add `python-multipart` to `requirements.txt`**
+
+Append: `python-multipart==0.0.9`
+
+- [ ] **Step 2: Add to `server.py`**
+
+Add near the top, alongside the other imports:
+
+```python
+import time
+from fastapi import UploadFile, File
+from fastapi.responses import HTMLResponse
+import subagents.yt_publisher as yt_publisher
+```
+
+Add near the other module-level constants:
+
+```python
+VIDEOS_DIR = "/data/videos"
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+UPLOAD_FORM_HTML = """<!doctype html>
+<html><body>
+<h3>Загрузка ролика</h3>
+<form action="" method="post" enctype="multipart/form-data">
+<input type="file" name="video" accept="video/*" required>
+<button type="submit">Загрузить</button>
+</form>
+</body></html>"""
+```
+
+Add the two routes (anywhere among the other `@app.get`/`@app.post` routes):
+
+```python
+@app.get("/upload/{token}", response_class=HTMLResponse)
+def upload_form(token: str):
+    info = yt_publisher.get_upload_token_info(token)
+    if not info:
+        return HTMLResponse("<h3>Ссылка недействительна или уже использована.</h3>", status_code=404)
+    return HTMLResponse(UPLOAD_FORM_HTML)
+
+@app.post("/upload/{token}", response_class=HTMLResponse)
+async def upload_submit(token: str, video: UploadFile = File(...)):
+    info = yt_publisher.get_upload_token_info(token)
+    if not info:
+        return HTMLResponse("<h3>Ссылка недействительна или уже использована.</h3>", status_code=404)
+
+    local_path = f"{VIDEOS_DIR}/self_{int(time.time())}.mp4"
+    with open(local_path, "wb") as f:
+        f.write(await video.read())
+
+    if not yt_publisher.consume_upload_token(token, local_path):
+        return HTMLResponse("<h3>Ссылка уже использована.</h3>", status_code=409)
+
+    return HTMLResponse("<h3>Готово! Видео загружено и обрабатывается.</h3>")
+```
+
+- [ ] **Step 3: Install and verify locally**
+
+```bash
+.venv/Scripts/pip.exe install python-multipart
+.venv/Scripts/python.exe -c "
+from subagents.yt_publisher import create_upload_token
+print(create_upload_token('t', 's', 'crypto'))
+"
+```
+
+Take the printed token, then:
+
+```bash
+MEDIA_SERVE_TOKEN=test123 .venv/Scripts/python.exe -m uvicorn server:app --port 8001 &
+curl -s "http://localhost:8001/upload/bogus-token"                 # expect 404 body "Ссылка недействительна..."
+curl -s "http://localhost:8001/upload/<the real token from above>" # expect the HTML upload form
+echo "fake video bytes" > /tmp/probe.mp4
+curl -s -F "video=@/tmp/probe.mp4" "http://localhost:8001/upload/<the real token>"   # expect success HTML
+curl -s -F "video=@/tmp/probe.mp4" "http://localhost:8001/upload/<the real token>"   # expect 409, token already used
+kill %1
+ls /data/videos/   # confirm a new self_<timestamp>.mp4 exists
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add server.py requirements.txt
+git commit -m "feat: add token-gated /upload endpoint for direct self-record video uploads"
+```
+
+---
+
+### Task 13: Wire the upload flow into `orchestrator.py` and `parser.py`
+
+**Files:**
+- Modify: `orchestrator.py`
+- Modify: `parser.py`
+
+**Interfaces:**
+- Consumes: `create_upload_token`, `pop_pending_uploads` (Task 11); `generate_video_metadata` (existing, Task 4); `send_video_for_approval` (existing, Task 7).
+- Produces: `process_self_record_uploads()` — scheduled every minute in `parser.py`.
+
+- [ ] **Step 1: `orchestrator.py` — add `BACKEND_URL` and extend the import line**
+
+Near the top, alongside `PARSER_BOT_TOKEN`/`ADMIN_TG_ID`:
+
+```python
+BACKEND_URL = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
+```
+
+Change the existing:
+```python
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video
+```
+to:
+```python
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads
+```
+
+- [ ] **Step 2: `orchestrator.py` — extend `propose_self_record_script()` and add `process_self_record_uploads()`**
+
+Inside `propose_self_record_script()`, right after the existing `awaiting_self_record_video[ADMIN_TG_ID] = {...}` block and before the `async with httpx.AsyncClient(...)` send, add:
+
+```python
+    upload_token = create_upload_token(script_data["topic"], script_data["script"], category)
+    upload_url = f"{BACKEND_URL}/upload/{upload_token}"
+```
+
+Then change the message `text` to add one more line at the end (right before the closing `),` of the `sendMessage` json), so the full text becomes:
+
+```python
+                "text": (
+                    f"🎬 <b>Тема для самозаписи ролика:</b>\n\n"
+                    f"📌 {script_data['topic']}\n\n"
+                    f"{'─' * 28}\n"
+                    f"{script_data['script']}\n"
+                    f"{'─' * 28}\n\n"
+                    f"Запиши видео на эту тему и пришли файл сюда — я подготовлю название, описание и отправлю на одобрение.\n\n"
+                    f"📎 Если ролик больше ~15 МБ, Telegram не даст мне его скачать напрямую — вместо этого загрузи его тут: {upload_url}"
+                ),
+```
+
+At the end of the file, add:
+
+```python
+# ── Обработка видео, загруженных через /upload (для роликов больше лимита Telegram) ──
+async def process_self_record_uploads():
+    uploads = pop_pending_uploads()
+    for item in uploads:
+        try:
+            metadata = await generate_video_metadata(item["topic"], item["script"], item["category"])
+            if not metadata:
+                logger.warning("process_self_record_uploads: сбой генерации метаданных — пропускаем")
+                continue
+            await send_video_for_approval(
+                item["video_path"], metadata["title"], metadata["description"], metadata["tags"], item["category"]
+            )
+        except Exception as e:
+            logger.error(f"process_self_record_uploads error: {e}")
+```
+
+- [ ] **Step 3: `parser.py` — import and schedule**
+
+Change:
+```python
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script
+```
+to:
+```python
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script, process_self_record_uploads
+```
+
+Right after the existing `scheduler.add_job(propose_self_record_script, "cron", day_of_week="sun", hour=19, minute=5)`:
+
+```python
+    # Обработка видео, загруженных через /upload (для самозаписи, раз в минуту)
+    scheduler.add_job(process_self_record_uploads, "interval", minutes=1)
+```
+
+- [ ] **Step 4: Manual verification**
+
+```bash
+.venv/Scripts/python.exe -c "import parser; import orchestrator; print(orchestrator.process_self_record_uploads)"
+```
+
+Expected: no import errors, prints the function object.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add orchestrator.py parser.py
+git commit -m "feat: wire direct-upload flow for self-recorded videos into scheduler"
+```
+
+---
+
+### Task 14: End-to-end manual verification
 
 **Files:** none (verification only)
 
@@ -1417,9 +1730,11 @@ In the admin Telegram bot: send `/generate_video`. Watch the logs (`railway logs
 - The video is visible on the YouTube channel (check `privacyStatus` matches `YOUTUBE_PRIVACY_STATUS`).
 - `@Crypto_AI_Forex` received the announcement message with the same link.
 
-- [ ] **Step 4: Exercise the self-record path**
+- [ ] **Step 4: Exercise the self-record path — both branches**
 
-Manually call `propose_self_record_script()` once (e.g. temporarily via a throwaway `/generate_video`-style admin command, or wait for Sunday 19:05) to receive the topic+script message, record a short clip, send it back to the bot as a video message, and confirm it goes through metadata generation → approval → (after tapping approve) YouTube upload → announcement, same as Step 3.
+Manually call `propose_self_record_script()` once (e.g. temporarily via a throwaway admin command, or wait for Sunday 19:05) to receive the topic+script message with the upload link.
+- **Small-clip branch:** send a clip well under 20MB directly as a Telegram video message; confirm it goes through metadata generation → approval → (after tapping approve) YouTube upload → announcement.
+- **Large-clip branch:** open the `{BACKEND_URL}/upload/{token}` link from the same message on a phone browser, upload a clip (ideally one over 20MB, to actually prove the point), confirm the page shows the success message, then within ~1 minute confirm the bot sends the same approval message as the small-clip case, and that approving it publishes correctly.
 
 - [ ] **Step 5: Exercise the failure paths deliberately**
 
