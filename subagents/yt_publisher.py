@@ -1,0 +1,328 @@
+"""
+Sub-agent: approval-цикл для YouTube Shorts + загрузка на YouTube + анонс в TG.
+Зеркалит форму tg_publisher.py, но для видео.
+"""
+import os
+import time
+import json
+import asyncio
+import hashlib
+import logging
+
+import httpx
+from telegram import Bot, InputFile
+from telegram.ext import ContextTypes
+
+logger = logging.getLogger(__name__)
+
+VIDEOS_DIR = "/data/videos"
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+PENDING_FILE  = "/data/pending_videos.json"
+APPROVED_FILE = "/data/approved_videos.json"
+
+pending_videos: dict = {}
+approved_videos: dict = {}
+editing_video_title: dict = {}
+awaiting_self_record_video: dict = {}
+
+PARSER_BOT_TOKEN = None
+ADMIN_TG_ID = None
+MAIN_BOT_TOKEN = None
+CHANNEL_ID = None
+YOUTUBE_CLIENT_ID = None
+YOUTUBE_CLIENT_SECRET = None
+YOUTUBE_REFRESH_TOKEN = None
+YOUTUBE_CATEGORY_ID = "22"
+YOUTUBE_PRIVACY_STATUS = "public"
+
+def configure(parser_bot_token, admin_tg_id, main_bot_token, channel_id,
+              youtube_client_id, youtube_client_secret, youtube_refresh_token,
+              youtube_category_id="22", youtube_privacy_status="public"):
+    global PARSER_BOT_TOKEN, ADMIN_TG_ID, MAIN_BOT_TOKEN, CHANNEL_ID
+    global YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
+    global YOUTUBE_CATEGORY_ID, YOUTUBE_PRIVACY_STATUS
+    PARSER_BOT_TOKEN = parser_bot_token
+    ADMIN_TG_ID = admin_tg_id
+    MAIN_BOT_TOKEN = main_bot_token
+    CHANNEL_ID = channel_id
+    YOUTUBE_CLIENT_ID = youtube_client_id
+    YOUTUBE_CLIENT_SECRET = youtube_client_secret
+    YOUTUBE_REFRESH_TOKEN = youtube_refresh_token
+    YOUTUBE_CATEGORY_ID = youtube_category_id
+    YOUTUBE_PRIVACY_STATUS = youtube_privacy_status
+
+def save_pending_videos():
+    try:
+        with open(PENDING_FILE, "w", encoding="utf-8") as f:
+            json.dump(pending_videos, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save pending videos error: {e}")
+
+def save_approved_videos():
+    try:
+        with open(APPROVED_FILE, "w", encoding="utf-8") as f:
+            json.dump(approved_videos, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save approved videos error: {e}")
+
+def load_pending_videos():
+    try:
+        if os.path.exists(PENDING_FILE):
+            with open(PENDING_FILE, "r", encoding="utf-8") as f:
+                pending_videos.clear()
+                pending_videos.update(json.load(f))
+            logger.info(f"Загружено {len(pending_videos)} pending видео")
+    except Exception as e:
+        logger.error(f"Load pending videos error: {e}")
+    try:
+        if os.path.exists(APPROVED_FILE):
+            with open(APPROVED_FILE, "r", encoding="utf-8") as f:
+                approved_videos.update(json.load(f))
+            logger.info(f"Загружено {len(approved_videos)} approved видео")
+    except Exception as e:
+        logger.error(f"Load approved videos error: {e}")
+
+# ── Клавиатура одобрения видео ────────────────────────────────────────────────
+def video_approval_keyboard(video_id: str) -> dict:
+    return {
+        "inline_keyboard": [[
+            {"text": "✅ Одобрить и опубликовать", "callback_data": f"vapprove_{video_id}"},
+        ], [
+            {"text": "✏️ Изменить название", "callback_data": f"vedit_{video_id}"},
+            {"text": "❌ Отменить", "callback_data": f"vcancel_{video_id}"},
+        ]]
+    }
+
+# ── Отправка видео на одобрение ───────────────────────────────────────────────
+async def send_video_for_approval(video_path: str, title: str, description: str, tags: list, category: str):
+    video_id = f"{category}_{hashlib.md5(title.encode()).hexdigest()[:8]}"
+    pending_videos[video_id] = {
+        "video_path": video_path,
+        "title": title,
+        "description": description,
+        "tags": tags,
+        "category": category,
+    }
+    save_pending_videos()
+
+    bot = Bot(token=PARSER_BOT_TOKEN)
+    with open(video_path, "rb") as video_file:
+        await bot.send_video(
+            chat_id=ADMIN_TG_ID,
+            video=InputFile(video_file),
+            caption=(
+                f"🎬 <b>Новый Short готов!</b> [{category.upper()}]\n\n"
+                f"📌 {title}\n\n{description[:500]}"
+            ),
+            parse_mode="HTML",
+            reply_markup=video_approval_keyboard(video_id),
+        )
+
+# ── Обработчик кнопок одобрения видео ─────────────────────────────────────────
+async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    action, video_id = query.data.split("_", 1)
+    video = pending_videos.get(video_id)
+    if not video:
+        await query.edit_message_text("⚠️ Видео не найдено или уже обработано.")
+        return
+
+    if action == "vapprove":
+        await query.edit_message_text("⏳ Загружаю на YouTube...")
+        pending_videos.pop(video_id, None)
+        approved_videos[video_id] = video
+        save_pending_videos()
+        save_approved_videos()
+
+        youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
+        async with httpx.AsyncClient(timeout=15) as client:
+            if youtube_id:
+                approved_videos.pop(video_id, None)
+                save_approved_videos()
+                await announce_in_telegram(youtube_id)
+                try:
+                    os.remove(video["video_path"])
+                except Exception:
+                    pass
+                await client.post(
+                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": ADMIN_TG_ID,
+                        "text": f"✅ <b>Видео опубликовано!</b>\nhttps://youtu.be/{youtube_id}",
+                        "parse_mode": "HTML",
+                    },
+                )
+            else:
+                await client.post(
+                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": ADMIN_TG_ID,
+                        "text": "❌ Загрузка на YouTube не удалась. Видео сохранено — попробуй /retry_videos позже.",
+                        "parse_mode": "HTML",
+                    },
+                )
+
+    elif action == "vedit":
+        editing_video_title[ADMIN_TG_ID] = video_id
+        await query.edit_message_text("✏️ Пришли новое название видео. Для отмены: /cancel", parse_mode="HTML")
+
+    elif action == "vcancel":
+        pending_videos.pop(video_id, None)
+        save_pending_videos()
+        await query.edit_message_text("❌ Видео отменено.")
+
+# ── Обработчик текста при редактировании названия ────────────────────────────
+async def handle_video_title_edit(update, context: ContextTypes.DEFAULT_TYPE):
+    admin_id = update.effective_user.id
+    video_id = editing_video_title.get(admin_id)
+    if not video_id:
+        return
+    video = pending_videos.get(video_id)
+    if not video:
+        editing_video_title.pop(admin_id, None)
+        await update.message.reply_text("⚠️ Видео не найдено.")
+        return
+
+    video["title"] = update.message.text[:100]
+    editing_video_title.pop(admin_id, None)
+    save_pending_videos()
+    await update.message.reply_text(
+        f"✅ <b>Название обновлено:</b>\n{video['title']}",
+        parse_mode="HTML",
+        reply_markup=video_approval_keyboard(video_id),
+    )
+
+# ── Обработчик видео, присланного админом (самозапись) ───────────────────────
+async def handle_video_file(update, context: ContextTypes.DEFAULT_TYPE):
+    admin_id = update.effective_user.id
+    state = awaiting_self_record_video.get(admin_id)
+    if not state:
+        return
+
+    await update.message.reply_text("⏳ Скачиваю видео на сервер...")
+    try:
+        video = update.message.video
+        file_id = video.file_id
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/getFile",
+                params={"file_id": file_id},
+            )
+            file_path = resp.json()["result"]["file_path"]
+            file_resp = await client.get(
+                f"https://api.telegram.org/file/bot{PARSER_BOT_TOKEN}/{file_path}"
+            )
+            local_path = f"{VIDEOS_DIR}/self_{int(time.time())}.mp4"
+            with open(local_path, "wb") as f:
+                f.write(file_resp.content)
+
+        awaiting_self_record_video.pop(admin_id, None)
+
+        from subagents.yt_script import generate_video_metadata
+        metadata = await generate_video_metadata(state["topic"], state["script"], state["category"])
+        if not metadata:
+            await update.message.reply_text("❌ Не удалось подготовить название/описание. Попробуй прислать видео ещё раз позже.")
+            return
+
+        await send_video_for_approval(
+            local_path, metadata["title"], metadata["description"], metadata["tags"], state["category"]
+        )
+    except Exception as e:
+        logger.error(f"handle_video_file error: {e}")
+        await update.message.reply_text(f"❌ Ошибка при обработке видео: {e}")
+
+# ── YouTube: сервис и загрузка ────────────────────────────────────────────────
+def get_youtube_service():
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    import googleapiclient.discovery
+
+    creds = Credentials(
+        token=None,
+        refresh_token=YOUTUBE_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=YOUTUBE_CLIENT_ID,
+        client_secret=YOUTUBE_CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"],
+    )
+    creds.refresh(Request())
+    return googleapiclient.discovery.build("youtube", "v3", credentials=creds)
+
+def _upload_sync(video_path: str, title: str, description: str, tags: list) -> str:
+    from googleapiclient.http import MediaFileUpload
+
+    youtube = get_youtube_service()
+    body = {
+        "snippet": {
+            "title": title[:100],
+            "description": description,
+            "tags": tags,
+            "categoryId": YOUTUBE_CATEGORY_ID,
+            "defaultLanguage": "ru",
+        },
+        "status": {
+            "privacyStatus": YOUTUBE_PRIVACY_STATUS,
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+    media = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True, chunksize=10 * 1024 * 1024)
+    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+    response = None
+    while response is None:
+        _, response = request.next_chunk()
+    return response["id"]
+
+async def upload_to_youtube(video_path: str, title: str, description: str, tags: list) -> str | None:
+    if not YOUTUBE_CLIENT_ID or not YOUTUBE_CLIENT_SECRET or not YOUTUBE_REFRESH_TOKEN:
+        logger.warning("YouTube OAuth не настроен — пропускаем загрузку")
+        return None
+    if not os.path.exists(video_path):
+        logger.error(f"upload_to_youtube: файл не найден {video_path}")
+        return None
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _upload_sync, video_path, title, description, tags)
+    except Exception as e:
+        logger.error(f"upload_to_youtube error: {e}")
+        return None
+
+async def announce_in_telegram(youtube_video_id: str):
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": CHANNEL_ID,
+                    "text": f"🎬 <b>Новый ролик на YouTube!</b>\n\nhttps://youtu.be/{youtube_video_id}",
+                    "parse_mode": "HTML",
+                },
+            )
+    except Exception as e:
+        logger.error(f"announce_in_telegram error: {e}")
+
+async def retry_upload(video_id: str):
+    video = approved_videos.get(video_id)
+    if not video:
+        return
+    youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
+    if not youtube_id:
+        return
+    approved_videos.pop(video_id, None)
+    save_approved_videos()
+    await announce_in_telegram(youtube_id)
+    try:
+        os.remove(video["video_path"])
+    except Exception:
+        pass
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": f"✅ <b>Видео опубликовано (повтор)!</b>\nhttps://youtu.be/{youtube_id}",
+                "parse_mode": "HTML",
+            },
+        )
