@@ -12,6 +12,7 @@ import json
 import random
 import logging
 import hashlib
+from datetime import datetime
 
 import httpx
 from telegram import Update, InputFile
@@ -45,6 +46,54 @@ PENDING_FILE  = "/data/pending_posts.json"
 APPROVED_FILE = "/data/approved_queue.json"
 PHOTOS_DIR    = "/data/photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
+
+# ── Дневной лимит на Catapult и горячие новости (не более 1 в день на категорию) ──
+DAILY_STATE_FILE = "/data/daily_content_state.json"
+daily_state: dict = {"date": "", "breaking_done": {}, "catapult_done": False}
+
+def _reset_daily_state_if_new_day():
+    today = datetime.utcnow().date().isoformat()
+    if daily_state.get("date") != today:
+        daily_state["date"] = today
+        daily_state["breaking_done"] = {}
+        daily_state["catapult_done"] = False
+        save_daily_state()
+
+def load_daily_state():
+    try:
+        if os.path.exists(DAILY_STATE_FILE):
+            with open(DAILY_STATE_FILE, "r", encoding="utf-8") as f:
+                daily_state.update(json.load(f))
+    except Exception as e:
+        logger.error(f"Load daily state error: {e}")
+    _reset_daily_state_if_new_day()
+
+def save_daily_state():
+    try:
+        with open(DAILY_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(daily_state, f, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Save daily state error: {e}")
+
+def breaking_already_posted_today(category: str) -> bool:
+    _reset_daily_state_if_new_day()
+    return daily_state["breaking_done"].get(category, False)
+
+def catapult_already_posted_today() -> bool:
+    _reset_daily_state_if_new_day()
+    return daily_state["catapult_done"]
+
+def mark_breaking_posted(category: str):
+    _reset_daily_state_if_new_day()
+    daily_state["breaking_done"][category] = True
+    if category == "catapult":
+        daily_state["catapult_done"] = True
+    save_daily_state()
+
+def mark_catapult_posted():
+    _reset_daily_state_if_new_day()
+    daily_state["catapult_done"] = True
+    save_daily_state()
 
 PARSER_BOT_TOKEN = None
 ADMIN_TG_ID = None
@@ -638,6 +687,21 @@ async def auto_publish(slot: str):
     logger.info(f"Публикую слот: {slot}")
     category = post["category"]
 
+    if category == "catapult" and catapult_already_posted_today():
+        logger.info(f"Пропускаю {slot} — по Catapult сегодня уже была публикация (дневной лимит 1 пост)")
+        approved_queue.pop(slot, None)
+        save_approved()
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": ADMIN_TG_ID,
+                    "text": "⏭ <b>Плановый пост Catapult пропущен</b> — сегодня уже была публикация по Catapult (лимит 1 пост в день).",
+                    "parse_mode": "HTML",
+                },
+            )
+        return
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             if category == "poll" and "poll_data" in post:
@@ -702,6 +766,8 @@ async def auto_publish(slot: str):
                 )
         approved_queue.pop(slot, None)
         save_approved()
+        if category == "catapult":
+            mark_catapult_posted()
         logger.info(f"✅ Опубликовано: {slot}")
     except Exception as e:
         logger.error(f"Ошибка публикации {slot}: {e}")
