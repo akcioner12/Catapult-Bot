@@ -16,6 +16,11 @@ from subagents.rewriter import generate_post_claude, generate_catapult_post, gen
 from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
+from subagents.yt_ideas import get_trending_shorts_ideas
+from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
+from subagents.yt_voice import generate_voiceover
+from subagents.yt_render import render_video
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, save_pending_videos
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,8 @@ POLL_TOPICS = [
 catapult_angle_idx: int = 0   # текущий угол Catapult
 poll_idx: int = 0             # текущий fallback-опрос (если генерация не удалась)
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "раз в 2 дня"
+short_category_idx: int = 0        # текущая категория для авто-Short
+self_record_category_idx: int = 0  # текущая категория для предложения самозаписи
 recent_poll_questions: list = []  # последние заданные вопросы — чтобы Claude не повторялся
 
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
@@ -359,4 +366,90 @@ async def evening_generation():
                 "text": "✅ <b>Все посты подготовлены и одобрены автоматически!</b>\n\nОни опубликуются завтра по расписанию без твоего участия.",
                 "parse_mode": "HTML"
             }
+        )
+
+# ── Авто-генерация ежедневного YouTube Short (21:00) ──────────────────────────
+async def generate_daily_short():
+    global short_category_idx
+    logger.info("=== Генерация YouTube Short ===")
+
+    categories = ["crypto", "ai", "forex", "catapult"]
+    category = categories[short_category_idx % len(categories)]
+    short_category_idx += 1
+
+    posts = await collect_top_posts(category)
+    topic_source = posts[0]["text"] if posts else category
+
+    ideas = await get_trending_shorts_ideas(category)
+    if ideas:
+        topic_source += "\n\nАктуальные форматы в нише сейчас: " + "; ".join(ideas[:3])
+
+    script_data = await generate_video_script(topic_source, category)
+    if not script_data:
+        logger.warning("generate_daily_short: сбой генерации сценария — пропускаем")
+        return
+
+    timestamp = int(datetime.utcnow().timestamp())
+    audio_path = await generate_voiceover(script_data["narration"], f"short_{timestamp}")
+    if not audio_path:
+        logger.warning("generate_daily_short: сбой озвучки — пропускаем")
+        return
+
+    image_paths = []
+    for i, brief in enumerate(script_data["image_briefs"]):
+        path = await generate_image(brief, f"short_{timestamp}_{i}")
+        if path:
+            image_paths.append(path)
+    if not image_paths:
+        logger.warning("generate_daily_short: не удалось сгенерировать картинки — пропускаем")
+        return
+
+    video_path = await render_video(script_data["narration"], image_paths, audio_path, f"short_{timestamp}")
+    if not video_path:
+        logger.warning("generate_daily_short: сбой рендера видео — пропускаем")
+        return
+
+    metadata = await generate_video_metadata(category, script_data["narration"], category)
+    if not metadata:
+        logger.warning("generate_daily_short: сбой генерации метаданных — пропускаем")
+        return
+
+    await send_video_for_approval(video_path, metadata["title"], metadata["description"], metadata["tags"], category)
+    logger.info(f"✅ Short готов и отправлен на одобрение: {category}")
+
+# ── Еженедельное предложение темы для самозаписи (вс, 19:05) ─────────────────
+async def propose_self_record_script():
+    global self_record_category_idx
+    logger.info("=== Предложение темы для самозаписи ===")
+
+    categories = ["crypto", "ai", "forex", "catapult"]
+    category = categories[self_record_category_idx % len(categories)]
+    self_record_category_idx += 1
+
+    script_data = await generate_self_record_script(category)
+    if not script_data:
+        logger.warning("propose_self_record_script: сбой генерации — пропускаем")
+        return
+
+    awaiting_self_record_video[ADMIN_TG_ID] = {
+        "topic": script_data["topic"],
+        "script": script_data["script"],
+        "category": category,
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": (
+                    f"🎬 <b>Тема для самозаписи ролика:</b>\n\n"
+                    f"📌 {script_data['topic']}\n\n"
+                    f"{'─' * 28}\n"
+                    f"{script_data['script']}\n"
+                    f"{'─' * 28}\n\n"
+                    f"Запиши видео на эту тему и пришли файл сюда — я подготовлю название, описание и отправлю на одобрение."
+                ),
+                "parse_mode": "HTML",
+            },
         )
