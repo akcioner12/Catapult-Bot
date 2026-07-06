@@ -30,7 +30,7 @@ from subagents.tg_publisher import (
     save_pending, load_pending, handle_approval, handle_photo,
     auto_publish, send_for_approval, handle_queue_action, preview_text,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script, process_self_record_uploads
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, approved_videos, awaiting_self_record_video,
@@ -1168,6 +1168,9 @@ async def main():
 
     # Еженедельное предложение темы для самозаписи (вс, 19:05 — сразу после контент-плана в 19:00)
     scheduler.add_job(propose_self_record_script, "cron", day_of_week="sun", hour=19, minute=5)
+
+    # Обработка видео, загруженных через /upload (для самозаписи, раз в минуту)
+    scheduler.add_job(process_self_record_uploads, "interval", minutes=1)
 
     # Воскресный контент-план в 19:00
     scheduler.add_job(

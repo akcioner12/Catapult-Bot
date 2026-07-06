@@ -20,7 +20,7 @@ from subagents.yt_ideas import get_trending_shorts_ideas
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
-from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # tg_publisher here would capture None at import time. Same env vars either way.
 PARSER_BOT_TOKEN = os.getenv("PARSER_BOT_TOKEN")
 ADMIN_TG_ID      = int(os.getenv("ADMIN_TG_ID", "0"))
+BACKEND_URL = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
 
 # ── Расписание публикаций (следующий день) ────────────────────────────────────
 PUBLISH_SCHEDULE = [
@@ -437,6 +438,9 @@ async def propose_self_record_script():
         "category": category,
     }
 
+    upload_token = create_upload_token(script_data["topic"], script_data["script"], category)
+    upload_url = f"{BACKEND_URL}/upload/{upload_token}"
+
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
@@ -448,8 +452,24 @@ async def propose_self_record_script():
                     f"{'─' * 28}\n"
                     f"{script_data['script']}\n"
                     f"{'─' * 28}\n\n"
-                    f"Запиши видео на эту тему и пришли файл сюда — я подготовлю название, описание и отправлю на одобрение."
+                    f"Запиши видео на эту тему и пришли файл сюда — я подготовлю название, описание и отправлю на одобрение.\n\n"
+                    f"📎 Если ролик больше ~15 МБ, Telegram не даст мне его скачать напрямую — вместо этого загрузи его тут: {upload_url}"
                 ),
                 "parse_mode": "HTML",
             },
         )
+
+# ── Обработка видео, загруженных через /upload (для роликов больше лимита Telegram) ──
+async def process_self_record_uploads():
+    uploads = pop_pending_uploads()
+    for item in uploads:
+        try:
+            metadata = await generate_video_metadata(item["topic"], item["script"], item["category"])
+            if not metadata:
+                logger.warning("process_self_record_uploads: сбой генерации метаданных — пропускаем")
+                continue
+            await send_video_for_approval(
+                item["video_path"], metadata["title"], metadata["description"], metadata["tags"], item["category"]
+            )
+        except Exception as e:
+            logger.error(f"process_self_record_uploads error: {e}")
