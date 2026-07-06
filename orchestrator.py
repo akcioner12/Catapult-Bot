@@ -20,7 +20,7 @@ from subagents.yt_ideas import get_trending_shorts_ideas
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
-from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, save_pending_videos
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video
 
 logger = logging.getLogger(__name__)
 

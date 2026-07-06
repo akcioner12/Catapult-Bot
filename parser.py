@@ -91,6 +91,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     editing_post.pop(user_id, None)
     awaiting_photo.pop(user_id, None)
     awaiting_photo_edit.pop(user_id, None)
+    yt_publisher.editing_video_title.pop(user_id, None)
     await update.message.reply_text("✅ Отменено.")
 
 async def cmd_test_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):

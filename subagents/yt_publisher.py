@@ -106,18 +106,21 @@ async def send_video_for_approval(video_path: str, title: str, description: str,
     }
     save_pending_videos()
 
-    bot = Bot(token=PARSER_BOT_TOKEN)
-    with open(video_path, "rb") as video_file:
-        await bot.send_video(
-            chat_id=ADMIN_TG_ID,
-            video=InputFile(video_file),
-            caption=(
-                f"🎬 <b>Новый Short готов!</b> [{category.upper()}]\n\n"
-                f"📌 {title}\n\n{description[:500]}"
-            ),
-            parse_mode="HTML",
-            reply_markup=video_approval_keyboard(video_id),
-        )
+    try:
+        bot = Bot(token=PARSER_BOT_TOKEN)
+        with open(video_path, "rb") as video_file:
+            await bot.send_video(
+                chat_id=ADMIN_TG_ID,
+                video=InputFile(video_file),
+                caption=(
+                    f"🎬 <b>Новый Short готов!</b> [{category.upper()}]\n\n"
+                    f"📌 {title}\n\n{description[:500]}"
+                ),
+                parse_mode="HTML",
+                reply_markup=video_approval_keyboard(video_id),
+            )
+    except Exception as e:
+        logger.error(f"send_video_for_approval error: {e}")
 
 # ── Обработчик кнопок одобрения видео ─────────────────────────────────────────
 async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
