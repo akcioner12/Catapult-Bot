@@ -5,6 +5,7 @@ Sub-agent: approval-цикл для YouTube Shorts + загрузка на YouTu
 import os
 import time
 import json
+import secrets
 import asyncio
 import hashlib
 import logging
@@ -20,6 +21,8 @@ os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 PENDING_FILE  = "/data/pending_videos.json"
 APPROVED_FILE = "/data/approved_videos.json"
+UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
+PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
 
 pending_videos: dict = {}
 approved_videos: dict = {}
@@ -329,3 +332,53 @@ async def retry_upload(video_id: str):
                 "parse_mode": "HTML",
             },
         )
+
+# ── Токены загрузки для самозаписи (обходим лимит getFile в 20МБ) ───────────
+def _read_json_file(path: str, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Read {path} error: {e}")
+    return default
+
+def _write_json_file(path: str, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Write {path} error: {e}")
+
+def create_upload_token(topic: str, script: str, category: str) -> str:
+    token = secrets.token_urlsafe(16)
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    tokens[token] = {"topic": topic, "script": script, "category": category}
+    _write_json_file(UPLOAD_TOKENS_FILE, tokens)
+    return token
+
+def get_upload_token_info(token: str) -> dict | None:
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    return tokens.get(token)
+
+def consume_upload_token(token: str, video_path: str) -> bool:
+    tokens = _read_json_file(UPLOAD_TOKENS_FILE, {})
+    info = tokens.pop(token, None)
+    if not info:
+        return False
+    _write_json_file(UPLOAD_TOKENS_FILE, tokens)
+
+    uploads = _read_json_file(PENDING_UPLOADS_FILE, [])
+    uploads.append({
+        "video_path": video_path,
+        "topic": info["topic"],
+        "script": info["script"],
+        "category": info["category"],
+    })
+    _write_json_file(PENDING_UPLOADS_FILE, uploads)
+    return True
+
+def pop_pending_uploads() -> list:
+    uploads = _read_json_file(PENDING_UPLOADS_FILE, [])
+    _write_json_file(PENDING_UPLOADS_FILE, [])
+    return uploads
