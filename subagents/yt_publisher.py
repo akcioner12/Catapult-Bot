@@ -111,14 +111,23 @@ async def send_video_for_approval(video_path: str, title: str, description: str,
 
     try:
         bot = Bot(token=PARSER_BOT_TOKEN)
-        with open(video_path, "rb") as video_file:
-            await bot.send_video(
+        caption = (
+            f"🎬 <b>Новый Short готов!</b> [{category.upper()}]\n\n"
+            f"📌 {title}\n\n{description[:500]}"
+        )
+        if os.path.getsize(video_path) < 45 * 1024 * 1024:
+            with open(video_path, "rb") as video_file:
+                await bot.send_video(
+                    chat_id=ADMIN_TG_ID,
+                    video=InputFile(video_file),
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=video_approval_keyboard(video_id),
+                )
+        else:
+            await bot.send_message(
                 chat_id=ADMIN_TG_ID,
-                video=InputFile(video_file),
-                caption=(
-                    f"🎬 <b>Новый Short готов!</b> [{category.upper()}]\n\n"
-                    f"📌 {title}\n\n{description[:500]}"
-                ),
+                text=caption + "\n\n⚠️ Файл слишком большой для превью в Telegram — одобри вслепую по названию/описанию, или проверь файл на сервере вручную.",
                 parse_mode="HTML",
                 reply_markup=video_approval_keyboard(video_id),
             )

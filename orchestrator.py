@@ -467,6 +467,15 @@ async def process_self_record_uploads():
             metadata = await generate_video_metadata(item["topic"], item["script"], item["category"])
             if not metadata:
                 logger.warning("process_self_record_uploads: сбой генерации метаданных — пропускаем")
+                async with httpx.AsyncClient(timeout=15) as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                        json={
+                            "chat_id": ADMIN_TG_ID,
+                            "text": "⚠️ Не удалось обработать загруженное видео (сбой генерации названия/описания). Файл сохранён на сервере, но не отправлен на одобрение — попробуй загрузить его ещё раз.",
+                            "parse_mode": "HTML",
+                        },
+                    )
                 continue
             await send_video_for_approval(
                 item["video_path"], metadata["title"], metadata["description"], metadata["tags"], item["category"]

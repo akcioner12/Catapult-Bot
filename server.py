@@ -10,6 +10,7 @@ import random
 import logging
 import json
 import httpx
+import shutil
 import time
 from datetime import datetime
 from typing import Optional
@@ -482,7 +483,7 @@ async def upload_submit(token: str, video: UploadFile = File(...)):
 
     local_path = f"{VIDEOS_DIR}/self_{int(time.time())}.mp4"
     with open(local_path, "wb") as f:
-        f.write(await video.read())
+        shutil.copyfileobj(video.file, f)
 
     if not yt_publisher.consume_upload_token(token, local_path):
         return HTMLResponse("<h3>Ссылка уже использована.</h3>", status_code=409)
