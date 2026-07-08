@@ -13,7 +13,7 @@ import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
 from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES
-from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard
+from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard, breaking_already_posted_today, catapult_already_posted_today, mark_breaking_posted
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
 from subagents.yt_ideas import get_trending_shorts_ideas
@@ -201,6 +201,13 @@ async def is_catapult_urgent(post_text: str) -> bool:
 async def check_breaking_news():
     logger.info("=== Проверка горячих новостей ===")
     for category in ["crypto", "ai", "forex", "catapult"]:
+        if breaking_already_posted_today(category):
+            logger.info(f"[{category}] Горячая новость уже публиковалась сегодня — пропускаем до завтра")
+            continue
+        if category == "catapult" and catapult_already_posted_today():
+            logger.info("[catapult] Catapult-пост уже был сегодня (плановый или горячий) — пропускаем")
+            continue
+
         posts = await collect_top_posts(category)
         if not posts:
             continue
@@ -235,6 +242,7 @@ async def check_breaking_news():
             brief = await generate_image_brief(text, category)
             photo_path = await generate_image(brief, slot)
             await publish_now_auto(text, category, slot, brief, photo_path, top["channel"])
+            mark_breaking_posted(category)
         except Exception as e:
             logger.error(f"check_breaking_news [{category}] error: {e}")
         await asyncio.sleep(2)

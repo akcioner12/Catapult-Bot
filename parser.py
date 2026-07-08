@@ -29,6 +29,7 @@ from subagents.tg_publisher import (
     pending_posts, approved_queue, awaiting_photo, awaiting_photo_edit, editing_post,
     save_pending, load_pending, handle_approval, handle_photo,
     auto_publish, send_for_approval, handle_queue_action, preview_text,
+    load_daily_state,
 )
 from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script, process_self_record_uploads
 import subagents.yt_publisher as yt_publisher
@@ -1197,6 +1198,7 @@ async def main():
     load_pending()
     load_pending_videos()
     load_poll_state()
+    load_daily_state()
 
     await parser_app.initialize()
     await parser_app.start()
