@@ -10,14 +10,20 @@ import random
 import logging
 import json
 import httpx
+import shutil
+import time
 from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import sqlite3
+import subagents.yt_publisher as yt_publisher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +43,20 @@ MINIAPP_URL      = os.getenv("MINIAPP_URL", "https://your-miniapp.com")
 BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")
 CATAPULT_JWT     = os.getenv("CATAPULT_JWT", "")
 CATAPULT_API     = "https://public-api.catapult.trade/graphql"
+MEDIA_SERVE_TOKEN = os.getenv("MEDIA_SERVE_TOKEN", "")
+MEDIA_DIRS = {"photos": "/data/photos", "audio": "/data/audio"}
+
+VIDEOS_DIR = "/data/videos"
+os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+UPLOAD_FORM_HTML = """<!doctype html>
+<html><body>
+<h3>Загрузка ролика</h3>
+<form action="" method="post" enctype="multipart/form-data">
+<input type="file" name="video" accept="video/*" required>
+<button type="submit">Загрузить</button>
+</form>
+</body></html>"""
 
 # ── База данных ───────────────────────────────────────────────────────────────
 
@@ -434,6 +454,41 @@ async def miniapp_data(ref_code: str):
         "miniapp_url":       f"{MINIAPP_URL}?ref={user['ref_code']}",
         "catapult_ref_link": f"https://catapulttrade.io/register?ref={user['ref_code']}",
     }
+
+@app.get("/media/{kind}/{filename}")
+def get_media(kind: str, filename: str, token: str = ""):
+    if not MEDIA_SERVE_TOKEN or token != MEDIA_SERVE_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    directory = MEDIA_DIRS.get(kind)
+    if not directory:
+        raise HTTPException(status_code=404, detail="Not found")
+    safe_name = os.path.basename(filename)
+    path = os.path.join(directory, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
+
+@app.get("/upload/{token}", response_class=HTMLResponse)
+def upload_form(token: str):
+    info = yt_publisher.get_upload_token_info(token)
+    if not info:
+        return HTMLResponse("<h3>Ссылка недействительна или уже использована.</h3>", status_code=404)
+    return HTMLResponse(UPLOAD_FORM_HTML)
+
+@app.post("/upload/{token}", response_class=HTMLResponse)
+async def upload_submit(token: str, video: UploadFile = File(...)):
+    info = yt_publisher.get_upload_token_info(token)
+    if not info:
+        return HTMLResponse("<h3>Ссылка недействительна или уже использована.</h3>", status_code=404)
+
+    local_path = f"{VIDEOS_DIR}/self_{int(time.time())}.mp4"
+    with open(local_path, "wb") as f:
+        shutil.copyfileobj(video.file, f)
+
+    if not yt_publisher.consume_upload_token(token, local_path):
+        return HTMLResponse("<h3>Ссылка уже использована.</h3>", status_code=409)
+
+    return HTMLResponse("<h3>Готово! Видео загружено и обрабатывается.</h3>")
 
 # ── Запуск ────────────────────────────────────────────────────────────────────
 

@@ -31,7 +31,12 @@ from subagents.tg_publisher import (
     auto_publish, send_for_approval, handle_queue_action, preview_text,
     load_daily_state,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script, process_self_record_uploads
+import subagents.yt_publisher as yt_publisher
+from subagents.yt_publisher import (
+    pending_videos, approved_videos, awaiting_self_record_video,
+    save_pending_videos, load_pending_videos, handle_video_approval, handle_video_file,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +72,10 @@ async def handle_edit_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await handle_warmup_message(update, context)
         return
 
+    if user_id in yt_publisher.editing_video_title:
+        await yt_publisher.handle_video_title_edit(update, context)
+        return
+
     await tg_publisher.handle_admin_edit(update, context)
 
 # ── Команды модерации (только админ) ──────────────────────────────────────────
@@ -83,6 +92,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     editing_post.pop(user_id, None)
     awaiting_photo.pop(user_id, None)
     awaiting_photo_edit.pop(user_id, None)
+    yt_publisher.editing_video_title.pop(user_id, None)
     await update.message.reply_text("✅ Отменено.")
 
 async def cmd_test_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,6 +106,22 @@ async def cmd_test_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     text = await generate_post_claude(posts, "crypto")
     await send_for_approval(text, "crypto", "crypto_1", posts[0]["channel"], posts[0]["text"])
+
+async def cmd_generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    await update.message.reply_text("🎬 Генерирую YouTube Short...")
+    await generate_daily_short()
+
+async def cmd_retry_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    if not approved_videos:
+        await update.message.reply_text("📭 Нет видео для повторной загрузки.")
+        return
+    await update.message.reply_text(f"🔄 Повторная загрузка {len(approved_videos)} видео...")
+    for video_id in list(approved_videos.keys()):
+        await yt_publisher.retry_upload(video_id)
 
 async def cmd_test_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1078,6 +1104,12 @@ async def main():
 
     tg_publisher.configure(PARSER_BOT_TOKEN, ADMIN_TG_ID, MAIN_BOT_TOKEN, CHANNEL_ID)
 
+    yt_publisher.configure(
+        PARSER_BOT_TOKEN, ADMIN_TG_ID, MAIN_BOT_TOKEN, CHANNEL_ID,
+        os.getenv("YOUTUBE_CLIENT_ID", ""), os.getenv("YOUTUBE_CLIENT_SECRET", ""), os.getenv("YOUTUBE_REFRESH_TOKEN", ""),
+        os.getenv("YOUTUBE_CATEGORY_ID", "22"), os.getenv("YOUTUBE_PRIVACY_STATUS", "public"),
+    )
+
     # ════════════════════════════════════════════════════════════════════
     # ── БОТ #1: @Parser_catapult_bot — модерация постов (только админ) ──
     # ════════════════════════════════════════════════════════════════════
@@ -1089,6 +1121,10 @@ async def main():
     parser_app.add_handler(CommandHandler("queue", cmd_queue))
     parser_app.add_handler(CommandHandler("test_publish", cmd_test_publish))
     parser_app.add_handler(CommandHandler("test_generate", cmd_test_generate))
+    parser_app.add_handler(CommandHandler("generate_video", cmd_generate_video))
+    parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
+    parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit)_"))
+    parser_app.add_handler(MessageHandler(filters.VIDEO & filters.User(ADMIN_TG_ID), handle_video_file))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     parser_app.add_handler(CallbackQueryHandler(handle_queue_action, pattern="^(qpreview|qcancel|qeditphoto|qedit)_"))
     parser_app.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_TG_ID), handle_photo))
@@ -1128,6 +1164,15 @@ async def main():
     # Проверка горячих новостей каждый час
     scheduler.add_job(check_breaking_news, "interval", hours=1)
 
+    # Ежедневная генерация YouTube Short в 21:00 (после вечерней генерации TG-постов в 20:00)
+    scheduler.add_job(generate_daily_short, "cron", hour=21, minute=0)
+
+    # Еженедельное предложение темы для самозаписи (вс, 19:05 — сразу после контент-плана в 19:00)
+    scheduler.add_job(propose_self_record_script, "cron", day_of_week="sun", hour=19, minute=5)
+
+    # Обработка видео, загруженных через /upload (для самозаписи, раз в минуту)
+    scheduler.add_job(process_self_record_uploads, "interval", minutes=1)
+
     # Воскресный контент-план в 19:00
     scheduler.add_job(
         send_weekly_plan, "cron", day_of_week="sun", hour=19, minute=0,
@@ -1151,6 +1196,7 @@ async def main():
     logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
 
     load_pending()
+    load_pending_videos()
     load_poll_state()
     load_daily_state()
 
