@@ -7,6 +7,8 @@ import urllib.parse
 
 import httpx
 
+from subagents.media_push import push_media
+
 logger = logging.getLogger(__name__)
 
 PHOTOS_DIR = "/data/photos"
@@ -31,6 +33,7 @@ async def generate_image(brief: str, filename: str) -> str | None:
             with open(local_path, "wb") as f:
                 f.write(resp.content)
 
+            await push_media("photos", local_path)
             logger.info(f"✅ Картинка сгенерирована: {local_path}")
             return local_path
     except Exception as e:

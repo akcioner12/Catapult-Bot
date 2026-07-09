@@ -468,6 +468,21 @@ def get_media(kind: str, filename: str, token: str = ""):
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path)
 
+@app.post("/media/{kind}/{filename}")
+async def put_media(kind: str, filename: str, token: str = "", file: UploadFile = File(...)):
+    """Принимает файл от Catapult-Bot (у него своё, не общее с web хранилище) для раздачи через /media."""
+    if not MEDIA_SERVE_TOKEN or token != MEDIA_SERVE_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    directory = MEDIA_DIRS.get(kind)
+    if not directory:
+        raise HTTPException(status_code=404, detail="Not found")
+    os.makedirs(directory, exist_ok=True)
+    safe_name = os.path.basename(filename)
+    path = os.path.join(directory, safe_name)
+    with open(path, "wb") as f:
+        f.write(await file.read())
+    return {"ok": True}
+
 @app.get("/upload/{token}", response_class=HTMLResponse)
 def upload_form(token: str):
     info = yt_publisher.get_upload_token_info(token)

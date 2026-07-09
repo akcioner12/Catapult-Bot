@@ -6,6 +6,8 @@ import logging
 
 import httpx
 
+from subagents.media_push import push_media
+
 logger = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY  = os.getenv("ELEVENLABS_API_KEY", "")
@@ -39,6 +41,7 @@ async def generate_voiceover(script_text: str, filename: str) -> str | None:
             with open(local_path, "wb") as f:
                 f.write(resp.content)
 
+            await push_media("audio", local_path)
             logger.info(f"✅ Озвучка сгенерирована: {local_path}")
             return local_path
     except Exception as e:
