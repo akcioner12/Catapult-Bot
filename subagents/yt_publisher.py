@@ -134,6 +134,15 @@ async def send_video_for_approval(video_path: str, title: str, description: str,
     except Exception as e:
         logger.error(f"send_video_for_approval error: {e}")
 
+# ── Правка текста/caption сообщения-одобрения ──────────────────────────────
+async def _edit_status(query, text: str, **kwargs):
+    """query.message может быть видео с caption (send_video) или обычным текстом
+    (send_message в ветке "файл слишком большой") — edit_message_text падает на видео."""
+    if query.message.video or query.message.photo:
+        await query.edit_message_caption(caption=text, **kwargs)
+    else:
+        await query.edit_message_text(text, **kwargs)
+
 # ── Обработчик кнопок одобрения видео ─────────────────────────────────────────
 async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -142,11 +151,11 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
     action, video_id = query.data.split("_", 1)
     video = pending_videos.get(video_id)
     if not video:
-        await query.edit_message_text("⚠️ Видео не найдено или уже обработано.")
+        await _edit_status(query, "⚠️ Видео не найдено или уже обработано.")
         return
 
     if action == "vapprove":
-        await query.edit_message_text("⏳ Загружаю на YouTube...")
+        await _edit_status(query, "⏳ Загружаю на YouTube...")
         pending_videos.pop(video_id, None)
         approved_videos[video_id] = video
         save_pending_videos()
@@ -182,12 +191,12 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "vedit":
         editing_video_title[ADMIN_TG_ID] = video_id
-        await query.edit_message_text("✏️ Пришли новое название видео. Для отмены: /cancel", parse_mode="HTML")
+        await _edit_status(query, "✏️ Пришли новое название видео. Для отмены: /cancel", parse_mode="HTML")
 
     elif action == "vcancel":
         pending_videos.pop(video_id, None)
         save_pending_videos()
-        await query.edit_message_text("❌ Видео отменено.")
+        await _edit_status(query, "❌ Видео отменено.")
 
 # ── Обработчик текста при редактировании названия ────────────────────────────
 async def handle_video_title_edit(update, context: ContextTypes.DEFAULT_TYPE):
