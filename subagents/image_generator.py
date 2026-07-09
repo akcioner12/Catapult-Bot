@@ -22,11 +22,16 @@ async def generate_image(brief: str, filename: str) -> str | None:
         prompt = urllib.parse.quote(brief[:800])
         url = POLLINATIONS_URL.format(prompt=prompt)
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.get(
-                url,
-                params={"width": 1536, "height": 1024, "nologo": "true"},
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
+            resp = None
+            for attempt in range(3):
+                resp = await client.get(
+                    url,
+                    params={"width": 1080, "height": 1920, "nologo": "true"},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if resp.status_code < 500:
+                    break
+                logger.warning(f"Pollinations {resp.status_code} на попытке {attempt + 1}/3 — повтор")
             resp.raise_for_status()
 
             local_path = f"{PHOTOS_DIR}/{filename}.jpg"

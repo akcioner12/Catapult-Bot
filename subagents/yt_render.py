@@ -45,6 +45,8 @@ async def render_video(script_text: str, image_paths: list[str], audio_path: str
                     "type": "image",
                     "src": _media_url("photos", path),
                     "duration": duration_per_image,
+                    "position": "center-center",
+                    "resize": "cover",
                     "zoom": 2,
                     "pan": "right" if i % 2 == 0 else "left",
                 }]
