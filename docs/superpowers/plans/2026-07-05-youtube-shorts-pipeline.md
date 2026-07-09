@@ -1715,7 +1715,7 @@ git commit -m "feat: wire direct-upload flow for self-recorded videos into sched
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Set all new env vars**
+- [x] **Step 1: Set all new env vars**
 
 Locally (`.env` or exported) and on Railway (`Catapult-Bot` service → Variables): `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `JSON2VIDEO_API_KEY`, `MEDIA_SERVE_TOKEN` (same value on both `web` and `parser` processes — they share `/data` but need the matching token to talk to each other).
 
