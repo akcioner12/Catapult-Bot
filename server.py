@@ -455,7 +455,7 @@ async def miniapp_data(ref_code: str):
         "catapult_ref_link": f"https://catapulttrade.io/register?ref={user['ref_code']}",
     }
 
-@app.get("/media/{kind}/{filename}")
+@app.api_route("/media/{kind}/{filename}", methods=["GET", "HEAD"])
 def get_media(kind: str, filename: str, token: str = ""):
     if not MEDIA_SERVE_TOKEN or token != MEDIA_SERVE_TOKEN:
         raise HTTPException(status_code=403, detail="Forbidden")
