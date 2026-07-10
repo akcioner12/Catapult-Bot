@@ -423,7 +423,7 @@ async def generate_daily_short():
         logger.warning("generate_daily_short: сбой генерации метаданных — пропускаем")
         return
 
-    await send_video_for_approval(video_path, metadata["title"], metadata["description"], metadata["tags"], category)
+    await send_video_for_approval(video_path, metadata["title"], metadata["description"], metadata["tags"], category, thumbnail_path=image_paths[0])
     logger.info(f"✅ Short готов и отправлен на одобрение: {category}")
 
 # ── Еженедельное предложение темы для самозаписи (вс, 19:05) ─────────────────

@@ -98,7 +98,7 @@ def video_approval_keyboard(video_id: str) -> dict:
     }
 
 # ── Отправка видео на одобрение ───────────────────────────────────────────────
-async def send_video_for_approval(video_path: str, title: str, description: str, tags: list, category: str):
+async def send_video_for_approval(video_path: str, title: str, description: str, tags: list, category: str, thumbnail_path: str | None = None):
     video_id = f"{category}_{hashlib.md5(title.encode()).hexdigest()[:8]}"
     pending_videos[video_id] = {
         "video_path": video_path,
@@ -106,6 +106,7 @@ async def send_video_for_approval(video_path: str, title: str, description: str,
         "description": description,
         "tags": tags,
         "category": category,
+        "thumbnail_path": thumbnail_path,
     }
     save_pending_videos()
 
@@ -166,7 +167,7 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
             if youtube_id:
                 approved_videos.pop(video_id, None)
                 save_approved_videos()
-                await announce_in_telegram(youtube_id)
+                await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
                 try:
                     os.remove(video["video_path"])
                 except Exception:
@@ -313,17 +314,21 @@ async def upload_to_youtube(video_path: str, title: str, description: str, tags:
         logger.error(f"upload_to_youtube error: {e}")
         return None
 
-async def announce_in_telegram(youtube_video_id: str):
+async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail_path: str | None = None):
+    caption = f"🎬 <b>Новый ролик на YouTube!</b>\n\n📌 {title}\n\nhttps://youtu.be/{youtube_video_id}" if title \
+        else f"🎬 <b>Новый ролик на YouTube!</b>\n\nhttps://youtu.be/{youtube_video_id}"
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
-                json={
-                    "chat_id": CHANNEL_ID,
-                    "text": f"🎬 <b>Новый ролик на YouTube!</b>\n\nhttps://youtu.be/{youtube_video_id}",
-                    "parse_mode": "HTML",
-                },
-            )
+        bot = Bot(token=MAIN_BOT_TOKEN)
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            with open(thumbnail_path, "rb") as photo_file:
+                await bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=InputFile(photo_file),
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+        else:
+            await bot.send_message(chat_id=CHANNEL_ID, text=caption, parse_mode="HTML")
     except Exception as e:
         logger.error(f"announce_in_telegram error: {e}")
 
@@ -336,7 +341,7 @@ async def retry_upload(video_id: str):
         return
     approved_videos.pop(video_id, None)
     save_approved_videos()
-    await announce_in_telegram(youtube_id)
+    await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
     try:
         os.remove(video["video_path"])
     except Exception:
