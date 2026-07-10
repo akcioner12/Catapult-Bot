@@ -15,6 +15,7 @@ from telegram import Bot, InputFile
 from telegram.ext import ContextTypes
 
 from subagents.tiktok_publisher import upload_to_tiktok
+from subagents.tiktok_moderation import check_tiktok_compliance
 
 logger = logging.getLogger(__name__)
 
@@ -347,18 +348,30 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     и для /retry_videos."""
     await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
 
-    tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
-    if tiktok_url:
-        status_lines.append(f"✅ TikTok: {tiktok_url}")
+    if video["category"] == "catapult":
+        block_reason = "продвижение платформы Catapult Trade — TikTok запрещает такой контент"
+    else:
+        block_reason = await check_tiktok_compliance(_tiktok_caption(video))
+
+    if block_reason:
+        status_lines.append(f"⚠️ TikTok пропущен: {block_reason}")
         try:
             os.remove(video["video_path"])
         except Exception:
             pass
     else:
-        status_lines.append("⚠️ TikTok не удался — /retry_tiktok")
-        tiktok_retry_pending[video_id] = video
-        save_tiktok_retry_pending()
+        tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
+        if tiktok_url:
+            status_lines.append(f"✅ TikTok: {tiktok_url}")
+            try:
+                os.remove(video["video_path"])
+            except Exception:
+                pass
+        else:
+            status_lines.append("⚠️ TikTok не удался — /retry_tiktok")
+            tiktok_retry_pending[video_id] = video
+            save_tiktok_retry_pending()
 
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
