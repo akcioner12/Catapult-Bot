@@ -14,6 +14,8 @@ import httpx
 from telegram import Bot, InputFile
 from telegram.ext import ContextTypes
 
+from subagents.tiktok_publisher import upload_to_tiktok
+
 logger = logging.getLogger(__name__)
 
 VIDEOS_DIR = "/data/videos"
@@ -23,11 +25,13 @@ PENDING_FILE  = "/data/pending_videos.json"
 APPROVED_FILE = "/data/approved_videos.json"
 UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
 PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
+TIKTOK_RETRY_FILE = "/data/tiktok_retry_pending.json"
 
 pending_videos: dict = {}
 approved_videos: dict = {}
 editing_video_title: dict = {}
 awaiting_self_record_video: dict = {}
+tiktok_retry_pending: dict = {}
 
 PARSER_BOT_TOKEN = None
 ADMIN_TG_ID = None
@@ -69,6 +73,13 @@ def save_approved_videos():
     except Exception as e:
         logger.error(f"Save approved videos error: {e}")
 
+def save_tiktok_retry_pending():
+    try:
+        with open(TIKTOK_RETRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(tiktok_retry_pending, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save tiktok retry pending error: {e}")
+
 def load_pending_videos():
     try:
         if os.path.exists(PENDING_FILE):
@@ -85,6 +96,13 @@ def load_pending_videos():
             logger.info(f"Загружено {len(approved_videos)} approved видео")
     except Exception as e:
         logger.error(f"Load approved videos error: {e}")
+    try:
+        if os.path.exists(TIKTOK_RETRY_FILE):
+            with open(TIKTOK_RETRY_FILE, "r", encoding="utf-8") as f:
+                tiktok_retry_pending.update(json.load(f))
+            logger.info(f"Загружено {len(tiktok_retry_pending)} видео на повтор TikTok")
+    except Exception as e:
+        logger.error(f"Load tiktok retry pending error: {e}")
 
 # ── Клавиатура одобрения видео ────────────────────────────────────────────────
 def video_approval_keyboard(video_id: str) -> dict:
@@ -163,24 +181,12 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
         save_approved_videos()
 
         youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
-        async with httpx.AsyncClient(timeout=15) as client:
-            if youtube_id:
-                approved_videos.pop(video_id, None)
-                save_approved_videos()
-                await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
-                try:
-                    os.remove(video["video_path"])
-                except Exception:
-                    pass
-                await client.post(
-                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                    json={
-                        "chat_id": ADMIN_TG_ID,
-                        "text": f"✅ <b>Видео опубликовано!</b>\nhttps://youtu.be/{youtube_id}",
-                        "parse_mode": "HTML",
-                    },
-                )
-            else:
+        if youtube_id:
+            approved_videos.pop(video_id, None)
+            save_approved_videos()
+            await _finish_publish(video_id, video, youtube_id)
+        else:
+            async with httpx.AsyncClient(timeout=15) as client:
                 await client.post(
                     f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                     json={
@@ -332,6 +338,35 @@ async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail
     except Exception as e:
         logger.error(f"announce_in_telegram error: {e}")
 
+async def _finish_publish(video_id: str, video: dict, youtube_id: str):
+    """После успешной загрузки на YouTube: анонсирует в канале, пробует TikTok,
+    и шлёт админу сводку по обеим площадкам. Общий код для первого одобрения
+    и для /retry_videos."""
+    await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
+
+    tiktok_url = await upload_to_tiktok(video["video_path"], video["title"])
+    status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
+    if tiktok_url:
+        status_lines.append(f"✅ TikTok: {tiktok_url}")
+        try:
+            os.remove(video["video_path"])
+        except Exception:
+            pass
+    else:
+        status_lines.append("⚠️ TikTok не удался — /retry_tiktok")
+        tiktok_retry_pending[video_id] = video
+        save_tiktok_retry_pending()
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": "<b>Видео опубликовано:</b>\n" + "\n".join(status_lines),
+                "parse_mode": "HTML",
+            },
+        )
+
 async def retry_upload(video_id: str):
     video = approved_videos.get(video_id)
     if not video:
@@ -341,7 +376,17 @@ async def retry_upload(video_id: str):
         return
     approved_videos.pop(video_id, None)
     save_approved_videos()
-    await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
+    await _finish_publish(video_id, video, youtube_id)
+
+async def retry_tiktok_upload(video_id: str):
+    video = tiktok_retry_pending.get(video_id)
+    if not video:
+        return
+    tiktok_url = await upload_to_tiktok(video["video_path"], video["title"])
+    if not tiktok_url:
+        return
+    tiktok_retry_pending.pop(video_id, None)
+    save_tiktok_retry_pending()
     try:
         os.remove(video["video_path"])
     except Exception:
@@ -351,7 +396,7 @@ async def retry_upload(video_id: str):
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": f"✅ <b>Видео опубликовано (повтор)!</b>\nhttps://youtu.be/{youtube_id}",
+                "text": f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}",
                 "parse_mode": "HTML",
             },
         )
