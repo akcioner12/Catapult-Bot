@@ -16,7 +16,7 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1
 PHOTOS_DIR = "/data/photos"
 
 
-async def generate_image(brief: str, filename: str) -> str | None:
+async def generate_image(brief: str, filename: str, aspect_ratio: str = "16:9") -> str | None:
     """Генерирует картинку по ТЗ через Gemini (Nano Banana 2). Возвращает путь к файлу или None."""
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY не задан — пропускаем генерацию картинки")
@@ -29,7 +29,7 @@ async def generate_image(brief: str, filename: str) -> str | None:
                 params={"key": GEMINI_API_KEY},
                 json={
                     "contents": [{"parts": [{"text": brief[:800]}]}],
-                    "generationConfig": {"imageConfig": {"aspectRatio": "9:16"}},
+                    "generationConfig": {"imageConfig": {"aspectRatio": aspect_ratio}},
                 },
             )
             if resp.status_code != 200:

@@ -406,7 +406,7 @@ async def generate_daily_short():
 
     image_paths = []
     for i, brief in enumerate(script_data["image_briefs"]):
-        path = await generate_image(brief, f"short_{timestamp}_{i}")
+        path = await generate_image(brief, f"short_{timestamp}_{i}", aspect_ratio="9:16")
         if path:
             image_paths.append(path)
     if not image_paths:
