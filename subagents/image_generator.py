@@ -1,9 +1,9 @@
 """
-Sub-agent: генерация картинок через Pollinations.ai (бесплатно, без API-ключа).
+Sub-agent: генерация картинок через Gemini 3.1 Flash Image (Nano Banana 2).
 """
+import base64
 import logging
 import os
-import urllib.parse
 
 import httpx
 
@@ -11,32 +11,43 @@ from subagents.media_push import push_media
 
 logger = logging.getLogger(__name__)
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
 PHOTOS_DIR = "/data/photos"
-POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 
 
 async def generate_image(brief: str, filename: str) -> str | None:
-    """Генерирует картинку по ТЗ через Pollinations.ai. Возвращает путь к файлу или None."""
+    """Генерирует картинку по ТЗ через Gemini (Nano Banana 2). Возвращает путь к файлу или None."""
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY не задан — пропускаем генерацию картинки")
+        return None
     try:
         os.makedirs(PHOTOS_DIR, exist_ok=True)
-        prompt = urllib.parse.quote(brief[:800])
-        url = POLLINATIONS_URL.format(prompt=prompt)
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = None
-            for attempt in range(3):
-                resp = await client.get(
-                    url,
-                    params={"width": 1080, "height": 1920, "nologo": "true"},
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                if resp.status_code < 500:
-                    break
-                logger.warning(f"Pollinations {resp.status_code} на попытке {attempt + 1}/3 — повтор")
-            resp.raise_for_status()
+            resp = await client.post(
+                GEMINI_URL,
+                params={"key": GEMINI_API_KEY},
+                json={
+                    "contents": [{"parts": [{"text": brief[:800]}]}],
+                    "generationConfig": {"imageConfig": {"aspectRatio": "9:16"}},
+                },
+            )
+            if resp.status_code != 200:
+                logger.error(f"Gemini image API error {resp.status_code}: {resp.text[:300]}")
+                return None
+            data = resp.json()
+            image_part = next(
+                (p for p in data["candidates"][0]["content"]["parts"] if "inlineData" in p),
+                None,
+            )
+            if not image_part:
+                logger.error(f"Gemini image API: в ответе нет картинки: {data}")
+                return None
 
-            local_path = f"{PHOTOS_DIR}/{filename}.jpg"
+            ext = "png" if "png" in image_part["inlineData"]["mimeType"] else "jpg"
+            local_path = f"{PHOTOS_DIR}/{filename}.{ext}"
             with open(local_path, "wb") as f:
-                f.write(resp.content)
+                f.write(base64.b64decode(image_part["inlineData"]["data"]))
 
             await push_media("photos", local_path)
             logger.info(f"✅ Картинка сгенерирована: {local_path}")
