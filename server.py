@@ -44,7 +44,7 @@ BOT_API_URL      = os.getenv("BOT_API_URL", "http://localhost:8001")
 CATAPULT_JWT     = os.getenv("CATAPULT_JWT", "")
 CATAPULT_API     = "https://public-api.catapult.trade/graphql"
 MEDIA_SERVE_TOKEN = os.getenv("MEDIA_SERVE_TOKEN", "")
-MEDIA_DIRS = {"photos": "/data/photos", "audio": "/data/audio"}
+MEDIA_DIRS = {"photos": "/data/photos", "audio": "/data/audio", "videos": "/data/videos"}
 
 VIDEOS_DIR = "/data/videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
