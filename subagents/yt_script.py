@@ -18,6 +18,14 @@ CONTEXT_BY_CATEGORY = {
     "catapult": "торговую платформу Catapult Trade",
 }
 
+SOCIAL_FOOTER = (
+    "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
+    "Instagram:   https://www.instagram.com/crypto.ai.forex/\n"
+    "Tik Tok:   https://www.tiktok.com/@crypto_ai_forex\n"
+    "Twitter/X:   https://x.com/cryptoaiforex\n\n"
+    "#Shorts #crypto #cryptocurrency #ai #aivideo #forex #forextrading #forexsignals"
+)
+
 async def _call_claude(prompt: str, max_tokens: int) -> str | None:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -140,9 +148,7 @@ TAGS: <тег1, тег2, тег3>"""
         logger.error(f"Не удалось распарсить метаданные видео: {raw[:300]}")
         return None
     title = title_match.group(1).strip()[:100]
-    description = desc_match.group(1).strip()
-    if "#shorts" not in description.lower():
-        description += "\n\n#Shorts"
+    description = desc_match.group(1).strip() + "\n\n" + SOCIAL_FOOTER
     tags = [t.strip() for t in tags_match.group(1).split(",")] if tags_match else []
     if not title or not description:
         return None

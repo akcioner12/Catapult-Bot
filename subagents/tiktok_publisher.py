@@ -43,7 +43,7 @@ def _media_url(kind: str, local_path: str) -> str:
     return f"{BACKEND_URL}/media/{kind}/{filename}?token={MEDIA_SERVE_TOKEN}"
 
 
-async def upload_to_tiktok(video_path: str, title: str) -> str | None:
+async def upload_to_tiktok(video_path: str, caption: str) -> str | None:
     """Публикует video_path в TikTok через Buffer. Возвращает ссылку на пост или None."""
     if not BUFFER_API_KEY or not BUFFER_TIKTOK_CHANNEL_ID:
         logger.warning("BUFFER_API_KEY/BUFFER_TIKTOK_CHANNEL_ID не заданы — пропускаем публикацию в TikTok")
@@ -68,7 +68,7 @@ async def upload_to_tiktok(video_path: str, title: str) -> str | None:
                     "variables": {
                         "input": {
                             "channelId": BUFFER_TIKTOK_CHANNEL_ID,
-                            "text": title[:150],
+                            "text": caption[:2200],
                             "mode": "shareNow",
                             "schedulingType": "automatic",
                             "assets": [{"video": {"url": video_url}}],

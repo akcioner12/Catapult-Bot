@@ -338,13 +338,16 @@ async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail
     except Exception as e:
         logger.error(f"announce_in_telegram error: {e}")
 
+def _tiktok_caption(video: dict) -> str:
+    return f"{video['title']}\n\n{video['description']}"
+
 async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     """После успешной загрузки на YouTube: анонсирует в канале, пробует TikTok,
     и шлёт админу сводку по обеим площадкам. Общий код для первого одобрения
     и для /retry_videos."""
     await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
 
-    tiktok_url = await upload_to_tiktok(video["video_path"], video["title"])
+    tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
     if tiktok_url:
         status_lines.append(f"✅ TikTok: {tiktok_url}")
@@ -382,7 +385,7 @@ async def retry_tiktok_upload(video_id: str):
     video = tiktok_retry_pending.get(video_id)
     if not video:
         return
-    tiktok_url = await upload_to_tiktok(video["video_path"], video["title"])
+    tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
     if not tiktok_url:
         return
     tiktok_retry_pending.pop(video_id, None)
