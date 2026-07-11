@@ -31,11 +31,12 @@ from subagents.tg_publisher import (
     auto_publish, send_for_approval, handle_queue_action, preview_text,
     load_daily_state,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_daily_short, propose_self_record_script, process_self_record_uploads
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, propose_self_record_script, process_self_record_uploads
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, approved_videos, awaiting_self_record_video, tiktok_retry_pending,
     save_pending_videos, load_pending_videos, handle_video_approval, handle_video_file,
+    publish_due_slot,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -110,8 +111,8 @@ async def cmd_test_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
-    await update.message.reply_text("🎬 Генерирую YouTube Short...")
-    await generate_daily_short()
+    await update.message.reply_text("🎬 Генерирую всю неделю видео (14 штук, это займёт время)...")
+    await generate_weekly_batch()
 
 async def cmd_retry_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1175,8 +1176,18 @@ async def main():
     # Проверка горячих новостей каждый час
     scheduler.add_job(check_breaking_news, "interval", hours=1)
 
-    # Ежедневная генерация YouTube Short в 21:00 (после вечерней генерации TG-постов в 20:00)
-    scheduler.add_job(generate_daily_short, "cron", hour=21, minute=0)
+    # Еженедельная генерация 14 видео (вс, 19:10 — сразу после контент-плана в 19:00)
+    scheduler.add_job(generate_weekly_batch, "cron", day_of_week="sun", hour=19, minute=10)
+
+    # Публикация по расписанию из очереди одобренных видео
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=8,  minute=30, args=["forex"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=19, minute=0,  args=["crypto"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="tue,thu",     hour=18, minute=30, args=["ai"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="tue,thu",     hour=20, minute=0,  args=["catapult"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="sat",         hour=12, minute=30, args=["ai"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="sat",         hour=14, minute=0,  args=["catapult"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="sun",         hour=12, minute=30, args=["crypto"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="sun",         hour=14, minute=0,  args=["ai"])
 
     # Еженедельное предложение темы для самозаписи (вс, 19:05 — сразу после контент-плана в 19:00)
     scheduler.add_job(propose_self_record_script, "cron", day_of_week="sun", hour=19, minute=5)
@@ -1203,6 +1214,7 @@ async def main():
     logger.info("🤖 Бот #1 (модерация): @Parser_catapult_bot")
     logger.info("🤖 Бот #2 (диалог):    @catapulttrade_guide_bot")
     logger.info("📅 Генерация: каждый день в 20:00")
+    logger.info("🎬 Генерация видео: воскресенье 19:10 (14 шт/неделю), публикация по расписанию WEEKLY_SCHEDULE")
     logger.info("📊 Контент-план: воскресенье 19:00")
     logger.info("📢 Публикации: 09:00 / 11:00 / 13:00 / 15:00 / 16:30 / 18:00 / 20:00")
 
