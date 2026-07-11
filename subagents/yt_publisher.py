@@ -310,8 +310,10 @@ async def handle_video_file(update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не удалось подготовить название/описание. Попробуй прислать видео ещё раз позже.")
             return
 
+        planned_day, planned_time = lookup_schedule_slot(state["category"])
         await send_video_for_approval(
-            local_path, metadata["title"], metadata["description"], metadata["tags"], state["category"]
+            local_path, metadata["title"], metadata["description"], metadata["tags"], state["category"],
+            planned_day=planned_day, planned_time=planned_time, narration=state["script"],
         )
     except Exception as e:
         logger.error(f"handle_video_file error: {e}")

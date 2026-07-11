@@ -20,7 +20,7 @@ from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
-from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads, WEEKLY_SCHEDULE
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads, WEEKLY_SCHEDULE, lookup_schedule_slot, notify_admin
 
 logger = logging.getLogger(__name__)
 
@@ -485,18 +485,12 @@ async def process_self_record_uploads():
             metadata = await generate_video_metadata(item["topic"], item["script"], item["category"])
             if not metadata:
                 logger.warning("process_self_record_uploads: сбой генерации метаданных — пропускаем")
-                async with httpx.AsyncClient(timeout=15) as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                        json={
-                            "chat_id": ADMIN_TG_ID,
-                            "text": "⚠️ Не удалось обработать загруженное видео (сбой генерации названия/описания). Файл сохранён на сервере, но не отправлен на одобрение — попробуй загрузить его ещё раз.",
-                            "parse_mode": "HTML",
-                        },
-                    )
+                await notify_admin("⚠️ Не удалось обработать загруженное видео (сбой генерации названия/описания). Файл сохранён на сервере, но не отправлен на одобрение — попробуй загрузить его ещё раз.")
                 continue
+            planned_day, planned_time = lookup_schedule_slot(item["category"])
             await send_video_for_approval(
-                item["video_path"], metadata["title"], metadata["description"], metadata["tags"], item["category"]
+                item["video_path"], metadata["title"], metadata["description"], metadata["tags"], item["category"],
+                planned_day=planned_day, planned_time=planned_time, narration=item["script"],
             )
         except Exception as e:
             logger.error(f"process_self_record_uploads error: {e}")
