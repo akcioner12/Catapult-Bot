@@ -17,7 +17,7 @@ from telegram import Bot, InputFile
 from telegram.ext import ContextTypes
 
 from subagents.tiktok_publisher import upload_to_tiktok
-from subagents.tiktok_moderation import check_tiktok_compliance
+from subagents.tiktok_moderation import check_tiktok_compliance, FAIL_CLOSED_REASON
 from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
@@ -32,6 +32,7 @@ APPROVED_FILE = "/data/approved_videos.json"
 UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
 PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
 TIKTOK_RETRY_FILE = "/data/tiktok_retry_pending.json"
+FAILED_UPLOADS_FILE = "/data/failed_uploads.json"
 
 KYIV_TZ = ZoneInfo("Europe/Kiev")
 
@@ -71,6 +72,7 @@ approved_videos: dict = {}
 editing_video_title: dict = {}
 awaiting_self_record_video: dict = {}
 tiktok_retry_pending: dict = {}
+failed_uploads: dict = {}
 
 PARSER_BOT_TOKEN = None
 ADMIN_TG_ID = None
@@ -126,6 +128,13 @@ def save_tiktok_retry_pending():
     except Exception as e:
         logger.error(f"Save tiktok retry pending error: {e}")
 
+def save_failed_uploads():
+    try:
+        with open(FAILED_UPLOADS_FILE, "w", encoding="utf-8") as f:
+            json.dump(failed_uploads, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save failed uploads error: {e}")
+
 def load_pending_videos():
     try:
         if os.path.exists(PENDING_FILE):
@@ -149,6 +158,13 @@ def load_pending_videos():
             logger.info(f"Загружено {len(tiktok_retry_pending)} видео на повтор TikTok")
     except Exception as e:
         logger.error(f"Load tiktok retry pending error: {e}")
+    try:
+        if os.path.exists(FAILED_UPLOADS_FILE):
+            with open(FAILED_UPLOADS_FILE, "r", encoding="utf-8") as f:
+                failed_uploads.update(json.load(f))
+            logger.info(f"Загружено {len(failed_uploads)} видео на повтор загрузки")
+    except Exception as e:
+        logger.error(f"Load failed uploads error: {e}")
 
 # ── Клавиатура одобрения видео ────────────────────────────────────────────────
 def video_approval_keyboard(video_id: str) -> dict:
@@ -168,7 +184,7 @@ async def send_video_for_approval(
     planned_day: str = "", planned_time: str = "",
     narration: str = "", image_paths: list[str] | None = None,
 ):
-    video_id = f"{category}_{hashlib.md5(title.encode()).hexdigest()[:8]}"
+    video_id = f"{category}_{hashlib.md5((title + video_path).encode()).hexdigest()[:8]}"
     pending_videos[video_id] = {
         "video_path": video_path,
         "title": title,
@@ -397,19 +413,45 @@ async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str
             return None
         video_path = await render_video(fallback["narration"], video["image_paths"], audio_path, f"{video_id}_tt")
         if not video_path:
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
             return None
     else:
         video_path = video["video_path"]
 
     recheck = await check_tiktok_compliance(fallback["caption"])
     if recheck:
+        if video.get("image_paths"):
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
         return None
 
     tiktok_url = await upload_to_tiktok(video_path, fallback["caption"])
     if not tiktok_url:
+        if video.get("image_paths"):
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
         return None
 
     if video.get("image_paths"):
+        try:
+            os.remove(audio_path)
+        except Exception:
+            pass
         try:
             os.remove(video_path)
         except Exception:
@@ -428,7 +470,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     block_reason = await check_tiktok_compliance(_tiktok_caption(video))
 
     if block_reason:
-        fallback_result = await _attempt_tiktok_fallback(video_id, video, block_reason)
+        fallback_result = await _attempt_tiktok_fallback(video_id, video, block_reason) if block_reason != FAIL_CLOSED_REASON else None
         if fallback_result:
             tiktok_url, note = fallback_result
             status_lines.append(f"✅ TikTok: {tiktok_url} ({note})")
@@ -454,14 +496,14 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     await notify_admin("<b>Видео опубликовано:</b>\n" + "\n".join(status_lines))
 
 async def retry_upload(video_id: str):
-    video = approved_videos.get(video_id)
+    video = failed_uploads.get(video_id)
     if not video:
         return
     youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
     if not youtube_id:
         return
-    approved_videos.pop(video_id, None)
-    save_approved_videos()
+    failed_uploads.pop(video_id, None)
+    save_failed_uploads()
     await _finish_publish(video_id, video, youtube_id)
 
 # ── Публикация по расписанию (крон дёргает раз в слот) ───────────────────────
@@ -483,8 +525,8 @@ async def publish_due_slot(category: str):
     if youtube_id:
         await _finish_publish(video_id, video, youtube_id)
     else:
-        approved_videos[video_id] = video
-        save_approved_videos()
+        failed_uploads[video_id] = video
+        save_failed_uploads()
         await notify_admin("❌ Загрузка на YouTube не удалась для запланированного видео. Сохранено — попробуй /retry_videos позже.")
 
 async def retry_tiktok_upload(video_id: str):

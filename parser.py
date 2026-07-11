@@ -34,7 +34,7 @@ from subagents.tg_publisher import (
 from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, propose_self_record_script, process_self_record_uploads
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
-    pending_videos, approved_videos, awaiting_self_record_video, tiktok_retry_pending,
+    pending_videos, awaiting_self_record_video, tiktok_retry_pending, failed_uploads,
     save_pending_videos, load_pending_videos, handle_video_approval, handle_video_file,
     publish_due_slot,
 )
@@ -117,11 +117,11 @@ async def cmd_generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_retry_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
-    if not approved_videos:
+    if not failed_uploads:
         await update.message.reply_text("📭 Нет видео для повторной загрузки.")
         return
-    await update.message.reply_text(f"🔄 Повторная загрузка {len(approved_videos)} видео...")
-    for video_id in list(approved_videos.keys()):
+    await update.message.reply_text(f"🔄 Повторная загрузка {len(failed_uploads)} видео...")
+    for video_id in list(failed_uploads.keys()):
         await yt_publisher.retry_upload(video_id)
 
 async def cmd_retry_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE):
