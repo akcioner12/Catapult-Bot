@@ -9,6 +9,8 @@ import secrets
 import asyncio
 import hashlib
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from telegram import Bot, InputFile
@@ -27,6 +29,39 @@ APPROVED_FILE = "/data/approved_videos.json"
 UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
 PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
 TIKTOK_RETRY_FILE = "/data/tiktok_retry_pending.json"
+
+KYIV_TZ = ZoneInfo("Europe/Kiev")
+
+WEEKLY_SCHEDULE = [
+    {"day": "mon", "hour": 8,  "minute": 30, "category": "forex"},
+    {"day": "mon", "hour": 19, "minute": 0,  "category": "crypto"},
+    {"day": "tue", "hour": 18, "minute": 30, "category": "ai"},
+    {"day": "tue", "hour": 20, "minute": 0,  "category": "catapult"},
+    {"day": "wed", "hour": 8,  "minute": 30, "category": "forex"},
+    {"day": "wed", "hour": 19, "minute": 0,  "category": "crypto"},
+    {"day": "thu", "hour": 18, "minute": 30, "category": "ai"},
+    {"day": "thu", "hour": 20, "minute": 0,  "category": "catapult"},
+    {"day": "fri", "hour": 8,  "minute": 30, "category": "forex"},
+    {"day": "fri", "hour": 19, "minute": 0,  "category": "crypto"},
+    {"day": "sat", "hour": 12, "minute": 30, "category": "ai"},
+    {"day": "sat", "hour": 14, "minute": 0,  "category": "catapult"},
+    {"day": "sun", "hour": 12, "minute": 30, "category": "crypto"},
+    {"day": "sun", "hour": 14, "minute": 0,  "category": "ai"},
+]
+
+DAY_NAMES_RU = {
+    "mon": "понедельник", "tue": "вторник", "wed": "среда", "thu": "четверг",
+    "fri": "пятница", "sat": "суббота", "sun": "воскресенье",
+}
+
+def lookup_schedule_slot(category: str) -> tuple[str, str]:
+    """Возвращает (planned_day, planned_time) первого слота этой категории в
+    WEEKLY_SCHEDULE — используется для видео вне обычной генерации (самозапись),
+    чисто для отображения админу; не влияет на порядок публикации."""
+    entry = next((e for e in WEEKLY_SCHEDULE if e["category"] == category), None)
+    if not entry:
+        return "", ""
+    return entry["day"], f'{entry["hour"]:02d}:{entry["minute"]:02d}'
 
 pending_videos: dict = {}
 approved_videos: dict = {}
@@ -117,7 +152,12 @@ def video_approval_keyboard(video_id: str) -> dict:
     }
 
 # ── Отправка видео на одобрение ───────────────────────────────────────────────
-async def send_video_for_approval(video_path: str, title: str, description: str, tags: list, category: str, thumbnail_path: str | None = None):
+async def send_video_for_approval(
+    video_path: str, title: str, description: str, tags: list, category: str,
+    thumbnail_path: str | None = None,
+    planned_day: str = "", planned_time: str = "",
+    narration: str = "", image_paths: list[str] | None = None,
+):
     video_id = f"{category}_{hashlib.md5(title.encode()).hexdigest()[:8]}"
     pending_videos[video_id] = {
         "video_path": video_path,
@@ -126,6 +166,10 @@ async def send_video_for_approval(video_path: str, title: str, description: str,
         "tags": tags,
         "category": category,
         "thumbnail_path": thumbnail_path,
+        "planned_day": planned_day,
+        "planned_time": planned_time,
+        "narration": narration,
+        "image_paths": image_paths or [],
     }
     save_pending_videos()
 
