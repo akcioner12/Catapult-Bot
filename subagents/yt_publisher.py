@@ -95,6 +95,13 @@ def configure(parser_bot_token, admin_tg_id, main_bot_token, channel_id,
     YOUTUBE_CATEGORY_ID = youtube_category_id
     YOUTUBE_PRIVACY_STATUS = youtube_privacy_status
 
+async def notify_admin(text: str):
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={"chat_id": ADMIN_TG_ID, "text": text, "parse_mode": "HTML"},
+        )
+
 def save_pending_videos():
     try:
         with open(PENDING_FILE, "w", encoding="utf-8") as f:
@@ -417,15 +424,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
-            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": ADMIN_TG_ID,
-                "text": "<b>Видео опубликовано:</b>\n" + "\n".join(status_lines),
-                "parse_mode": "HTML",
-            },
-        )
+    await notify_admin("<b>Видео опубликовано:</b>\n" + "\n".join(status_lines))
 
 async def retry_upload(video_id: str):
     video = approved_videos.get(video_id)
@@ -451,15 +450,7 @@ async def retry_tiktok_upload(video_id: str):
         os.remove(video["video_path"])
     except Exception:
         pass
-    async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
-            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": ADMIN_TG_ID,
-                "text": f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}",
-                "parse_mode": "HTML",
-            },
-        )
+    await notify_admin(f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}")
 
 # ── Токены загрузки для самозаписи (обходим лимит getFile в 20МБ) ───────────
 def _read_json_file(path: str, default):
