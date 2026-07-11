@@ -425,6 +425,29 @@ async def retry_upload(video_id: str):
     save_approved_videos()
     await _finish_publish(video_id, video, youtube_id)
 
+# ── Публикация по расписанию (крон дёргает раз в слот) ───────────────────────
+async def publish_due_slot(category: str):
+    """Публикует самое старое одобренное видео этой категории. Самовосстанавливается:
+    если к моменту слота ничего не одобрено — пропускаем с уведомлением, следующий
+    такой же слот заберёт то, что будет одобрено к тому времени."""
+    candidates = [(vid, v) for vid, v in approved_videos.items() if v["category"] == category]
+    if not candidates:
+        now = datetime.now(KYIV_TZ)
+        await notify_admin(f"⚠️ Не было одобренного {category}-видео к {now:%H:%M} — слот пропущен.")
+        return
+
+    video_id, video = candidates[0]
+    approved_videos.pop(video_id, None)
+    save_approved_videos()
+
+    youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
+    if youtube_id:
+        await _finish_publish(video_id, video, youtube_id)
+    else:
+        approved_videos[video_id] = video
+        save_approved_videos()
+        await notify_admin("❌ Загрузка на YouTube не удалась для запланированного видео. Сохранено — попробуй /retry_videos позже.")
+
 async def retry_tiktok_upload(video_id: str):
     video = tiktok_retry_pending.get(video_id)
     if not video:
