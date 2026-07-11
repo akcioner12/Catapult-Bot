@@ -155,3 +155,39 @@ TAGS: <тег1, тег2, тег3>"""
     if not title or not description:
         return None
     return {"title": title, "description": description, "tags": tags}
+
+# ── Более лояльная версия сценария под TikTok (fallback после блока) ─────────
+async def generate_tiktok_safe_script(original_narration: str, category: str, block_reason: str) -> dict | None:
+    context = CONTEXT_BY_CATEGORY.get(category, "финансы")
+    prompt = f"""Ты — редактор, адаптирующий сценарий ролика под более строгие правила TikTok о финансовом контенте.
+
+Тема: {context}
+
+Оригинальный текст ролика:
+{original_narration[:800]}
+
+Модератор TikTok отклонил этот контент по причине: {block_reason}
+
+Перепиши текст в нейтральную, информационную подачу той же темы — как новость или комментарий рынка, без промо-формулировок, без упоминания конкретных продуктов/платформ, без призывов к действию ("вложи", "заработай", "успей"). Сохрани суть темы и факты, но убери всё, что могло вызвать отклонение.
+
+Также напиши короткий caption для поста в TikTok (1-2 предложения, без хэштегов).
+
+Ответь СТРОГО в этом формате, без пояснений:
+NARRATION:
+<новый текст для озвучки>
+CAPTION:
+<текст подписи для TikTok>"""
+
+    raw = await _call_claude(prompt, max_tokens=600)
+    if not raw:
+        return None
+    narration_match = re.search(r"NARRATION:\s*(.+?)(?=\nCAPTION:|\Z)", raw, re.DOTALL)
+    caption_match = re.search(r"CAPTION:\s*(.+)", raw, re.DOTALL)
+    if not narration_match or not caption_match:
+        logger.error(f"Не удалось распарсить TikTok-safe сценарий: {raw[:300]}")
+        return None
+    narration = narration_match.group(1).strip()
+    caption = caption_match.group(1).strip()
+    if not narration or not caption:
+        return None
+    return {"narration": narration, "caption": caption}
