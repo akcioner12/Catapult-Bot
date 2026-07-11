@@ -5,6 +5,7 @@ Sub-agent: подсказки по темам для YouTube Shorts на осн�
 """
 import asyncio
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,8 @@ SEARCH_KEYWORDS = {
     "forex":    "форекс трейдинг",
     "catapult": "crypto трейдинг платформа",
 }
+
+COINGECKO_TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending"
 
 def _search_sync(youtube, query: str) -> list:
     response = youtube.search().list(
@@ -37,4 +40,18 @@ async def get_trending_shorts_ideas(category: str) -> list:
         return await loop.run_in_executor(None, _search_sync, youtube, query)
     except Exception as e:
         logger.warning(f"get_trending_shorts_ideas error: {e}")
+        return []
+
+
+async def get_trending_coins() -> list[str]:
+    """Топ монет с резким ростом поискового интереса (CoinGecko /search/trending,
+    публичный API, без ключа). [] при любой ошибке/таймауте — не блокирует генерацию."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(COINGECKO_TRENDING_URL)
+            data = resp.json()
+            coins = data.get("coins", [])[:7]
+            return [f'{c["item"]["name"]} ({c["item"]["symbol"].upper()})' for c in coins]
+    except Exception as e:
+        logger.warning(f"get_trending_coins error: {e}")
         return []
