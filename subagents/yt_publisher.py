@@ -226,27 +226,13 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "vapprove":
-        await _edit_status(query, "⏳ Загружаю на YouTube...")
         pending_videos.pop(video_id, None)
         approved_videos[video_id] = video
         save_pending_videos()
         save_approved_videos()
-
-        youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
-        if youtube_id:
-            approved_videos.pop(video_id, None)
-            save_approved_videos()
-            await _finish_publish(video_id, video, youtube_id)
-        else:
-            async with httpx.AsyncClient(timeout=15) as client:
-                await client.post(
-                    f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
-                    json={
-                        "chat_id": ADMIN_TG_ID,
-                        "text": "❌ Загрузка на YouTube не удалась. Видео сохранено — попробуй /retry_videos позже.",
-                        "parse_mode": "HTML",
-                    },
-                )
+        day_ru = DAY_NAMES_RU.get(video.get("planned_day", ""), "?")
+        time_str = video.get("planned_time") or "?"
+        await _edit_status(query, f"✅ В очереди. Выйдет: {day_ru}, {time_str}")
 
     elif action == "vedit":
         editing_video_title[ADMIN_TG_ID] = video_id
