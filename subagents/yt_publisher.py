@@ -566,6 +566,7 @@ async def retry_tiktok_upload(video_id: str):
             os.remove(video["video_path"])
         except Exception:
             pass
+    await notify_admin(f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}")
 
 async def retry_instagram_upload(video_id: str):
     video = instagram_retry_pending.get(video_id)
@@ -581,7 +582,7 @@ async def retry_instagram_upload(video_id: str):
             os.remove(video["video_path"])
         except Exception:
             pass
-    await notify_admin(f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}")
+    await notify_admin(f"✅ <b>Instagram опубликован (повтор)!</b>\n{instagram_url}")
 
 # ── Токены загрузки для самозаписи (обходим лимит getFile в 20МБ) ───────────
 def _read_json_file(path: str, default):
