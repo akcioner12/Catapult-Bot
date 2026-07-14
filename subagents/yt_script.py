@@ -18,6 +18,13 @@ CONTEXT_BY_CATEGORY = {
     "catapult": "торговую платформу Catapult Trade",
 }
 
+CATEGORY_LABELS = {
+    "crypto":   "Crypto",
+    "ai":       "AI",
+    "forex":    "Forex",
+    "catapult": "Catapult",
+}
+
 SOCIAL_FOOTER = (
     "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
     "Instagram:   https://www.instagram.com/crypto.ai.forex/\n"
@@ -149,7 +156,8 @@ TAGS: <тег1, тег2, тег3>"""
     if not title_match or not desc_match:
         logger.error(f"Не удалось распарсить метаданные видео: {raw[:300]}")
         return None
-    title = title_match.group(1).strip()[:100]
+    prefix = CATEGORY_LABELS.get(category, category.capitalize())
+    title = f"{prefix} | {title_match.group(1).strip()}"[:100]
     description = desc_match.group(1).strip() + "\n\n" + SOCIAL_FOOTER
     tags = [t.strip() for t in tags_match.group(1).split(",")] if tags_match else []
     if not title or not description:
