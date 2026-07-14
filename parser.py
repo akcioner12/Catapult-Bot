@@ -35,8 +35,8 @@ from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDU
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, awaiting_self_record_video, tiktok_retry_pending, failed_uploads,
-    save_pending_videos, load_pending_videos, handle_video_approval, handle_video_file,
-    publish_due_slot,
+    instagram_retry_pending, save_pending_videos, load_pending_videos, handle_video_approval,
+    handle_video_file, publish_due_slot,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -133,6 +133,16 @@ async def cmd_retry_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔄 Повторная публикация {len(tiktok_retry_pending)} видео в TikTok...")
     for video_id in list(tiktok_retry_pending.keys()):
         await yt_publisher.retry_tiktok_upload(video_id)
+
+async def cmd_retry_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    if not instagram_retry_pending:
+        await update.message.reply_text("📭 Нет видео для повторной публикации в Instagram.")
+        return
+    await update.message.reply_text(f"🔄 Повторная публикация {len(instagram_retry_pending)} видео в Instagram...")
+    for video_id in list(instagram_retry_pending.keys()):
+        await yt_publisher.retry_instagram_upload(video_id)
 
 async def cmd_test_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1135,6 +1145,7 @@ async def main():
     parser_app.add_handler(CommandHandler("generate_video", cmd_generate_video))
     parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
     parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))
+    parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
     parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit)_"))
     parser_app.add_handler(MessageHandler(filters.VIDEO & filters.User(ADMIN_TG_ID), handle_video_file))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
