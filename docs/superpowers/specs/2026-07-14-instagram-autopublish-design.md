@@ -50,7 +50,9 @@ async def upload_photo_to_instagram(photo_path: str, source_text: str, category:
 async def upload_reel_to_instagram(video_path: str, source_text: str, category: str) -> str | None
 ```
 
-Both: skip with a warning (return `None`) if `BUFFER_API_KEY`/`BUFFER_INSTAGRAM_CHANNEL_ID` unset; otherwise generate the caption, push the file to `web`'s `/media` endpoint via the existing `push_media` (photos already flow through this for the image-brief/replace-picture feature; videos already flow through it from the TikTok pass), then call `publish_to_buffer`.
+Both: skip with a warning (return `None`) if `BUFFER_API_KEY`/`BUFFER_INSTAGRAM_CHANNEL_ID` unset; otherwise generate the caption, then call `publish_to_buffer` with a media URL — obtained differently per type:
+- **Photo:** `generate_image` (`image_generator.py:52`) already calls `push_media("photos", ...)` at generation time, for every generated image, well before `auto_publish` ever runs — by the time Instagram publish is attempted, the file is already on `web`'s side. `upload_photo_to_instagram` builds the URL directly (same `_media_url("photos", photo_path)` helper `tiktok_publisher.py` already has), no redundant push.
+- **Reel:** the rendered video is only ever pushed on-demand, inside `tiktok_publisher.py::upload_to_tiktok` today — there's no earlier eager push to piggyback on. `upload_reel_to_instagram` must call `push_media("videos", video_path)` itself, same as `upload_to_tiktok` does.
 
 ## Data flow — photo posts
 
@@ -77,15 +79,24 @@ else:
     save_instagram_retry_pending()
 ```
 
-Placed after the existing TikTok if/else block, before the final `os.remove(video["video_path"])` calls are consolidated — the video file must survive until *both* TikTok's and Instagram's attempts have run, not just TikTok's. (Reusing `_tiktok_caption(video)`'s raw title+description as the *source text* fed into `generate_instagram_caption` — not posted verbatim; Instagram gets its own generated caption/hashtags from that source, unlike TikTok which posts the raw text directly.)
+Placed after the existing TikTok if/else block, run unconditionally in both branches (TikTok-blocked and TikTok-clean) — Instagram's own attempt doesn't depend on TikTok's compliance outcome. (Reusing `_tiktok_caption(video)`'s raw title+description as the *source text* fed into `generate_instagram_caption` — not posted verbatim; Instagram gets its own generated caption/hashtags from that source, unlike TikTok which posts the raw text directly.)
 
 `instagram_retry_pending: dict` mirrors `tiktok_retry_pending` exactly (own JSON file `/data/instagram_retry_pending.json`, `save_instagram_retry_pending()`/load-on-startup, same shape).
+
+### File-lifecycle fix (found during self-review, not in the original TikTok code)
+
+Today, `_finish_publish` deletes `video["video_path"]` as soon as TikTok's own attempt is resolved (success, or a compliance-fallback attempt that doesn't get retried) — this is safe *today* because TikTok is the only platform that can leave a pending retry pointing at that file. Adding Instagram as a second independent retry-capable consumer of the same file breaks that assumption: if TikTok fails (kept for `tiktok_retry_pending`) *and* Instagram fails (kept for `instagram_retry_pending`), whichever retries successfully first must NOT delete the file out from under the other's still-pending retry.
+
+Fix, touching both the new Instagram code and the existing TikTok retry code:
+- In `_finish_publish`'s TikTok-clean (`else`) branch: its existing `os.remove` only fires today when `tiktok_url` is truthy (success) — replace that single condition with `if tiktok_url and video_id not in instagram_retry_pending: os.remove(...)`, so a TikTok success doesn't delete a file Instagram still needs to retry. The compliance-blocked (`if block_reason`) branch's own unconditional delete is untouched — it never creates a TikTok retry entry, but it still needs the same `and video_id not in instagram_retry_pending` guard added, for the same reason.
+- In `retry_tiktok_upload` (existing function, needs a small edit): after its own success, delete the file only `if video_id not in instagram_retry_pending`.
+- In the new `retry_instagram_upload`: after its own success, delete the file only `if video_id not in tiktok_retry_pending`.
 
 ## Retry path
 
 New admin command `/retry_instagram` (`parser.py`), mirroring `/retry_tiktok`:
 - Iterates `instagram_retry_pending` (Reels only — see above for why photos have no retry store), calls new `yt_publisher.retry_instagram_upload(video_id)` per entry.
-- `retry_instagram_upload(video_id)`: re-attempts only `upload_reel_to_instagram` for that entry. On success, pops from `instagram_retry_pending`, deletes the local video file, confirms in the admin chat. On repeat failure, leaves the entry in place for a later retry.
+- `retry_instagram_upload(video_id)`: re-attempts only `upload_reel_to_instagram` for that entry. On success, pops from `instagram_retry_pending`, deletes the local video file *only if TikTok has no pending retry for the same `video_id`* (see file-lifecycle fix above), confirms in the admin chat. On repeat failure, leaves the entry in place for a later retry.
 
 ## Error handling
 
