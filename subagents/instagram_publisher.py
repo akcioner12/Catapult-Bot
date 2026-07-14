@@ -32,7 +32,8 @@ async def upload_photo_to_instagram(photo_path: str, source_text: str, category:
 
     parts = await generate_instagram_caption(source_text, category, "photo")
     return await publish_to_buffer(
-        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("photos", photo_path), "image"
+        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("photos", photo_path), "image",
+        metadata={"instagram": {"type": "post", "shouldShareToFeed": True}},
     )
 
 
@@ -51,5 +52,6 @@ async def upload_reel_to_instagram(video_path: str, source_text: str, category: 
 
     parts = await generate_instagram_caption(source_text, category, "reel")
     return await publish_to_buffer(
-        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("videos", video_path), "video"
+        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("videos", video_path), "video",
+        metadata={"instagram": {"type": "reel", "shouldShareToFeed": True}},
     )

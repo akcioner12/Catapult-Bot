@@ -34,15 +34,29 @@ query($id: PostId!) {
 """
 
 
-async def publish_to_buffer(channel_id: str, caption: str, media_url: str, media_type: str) -> str | None:
+async def publish_to_buffer(
+    channel_id: str, caption: str, media_url: str, media_type: str, metadata: dict | None = None
+) -> str | None:
     """Публикует media_url (уже публичный HTTPS-адрес) в канал channel_id через
-    Buffer. media_type: "video" или "image". Возвращает ссылку на пост, или
-    None при ошибке/таймауте (никогда не бросает исключение)."""
+    Buffer. media_type: "video" или "image". metadata: платформо-специфичные
+    поля Buffer (например {"instagram": {"type": "post", "shouldShareToFeed": True}}
+    — Instagram, в отличие от TikTok, требует явно указать тип поста). Возвращает
+    ссылку на пост, или None при ошибке/таймауте (никогда не бросает исключение)."""
     if not BUFFER_API_KEY or not channel_id:
         logger.warning("BUFFER_API_KEY/channel_id не заданы — пропускаем публикацию через Buffer")
         return None
 
     headers = {"Authorization": f"Bearer {BUFFER_API_KEY}", "Content-Type": "application/json"}
+
+    input_payload = {
+        "channelId": channel_id,
+        "text": caption[:2200],
+        "mode": "shareNow",
+        "schedulingType": "automatic",
+        "assets": [{media_type: {"url": media_url}}],
+    }
+    if metadata:
+        input_payload["metadata"] = metadata
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -51,15 +65,7 @@ async def publish_to_buffer(channel_id: str, caption: str, media_url: str, media
                 headers=headers,
                 json={
                     "query": CREATE_POST_MUTATION,
-                    "variables": {
-                        "input": {
-                            "channelId": channel_id,
-                            "text": caption[:2200],
-                            "mode": "shareNow",
-                            "schedulingType": "automatic",
-                            "assets": [{media_type: {"url": media_url}}],
-                        }
-                    },
+                    "variables": {"input": input_payload},
                 },
             )
             data = resp.json()
