@@ -31,7 +31,7 @@ from subagents.tg_publisher import (
     auto_publish, send_for_approval, handle_queue_action, preview_text,
     load_daily_state,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, propose_self_record_script, process_self_record_uploads
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, generate_one_test_video, propose_self_record_script, process_self_record_uploads
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, awaiting_self_record_video, tiktok_retry_pending, failed_uploads,
@@ -113,6 +113,12 @@ async def cmd_generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     await update.message.reply_text("🎬 Генерирую всю неделю видео (14 штук, это займёт время)...")
     await generate_weekly_batch()
+
+async def cmd_generate_video_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    await update.message.reply_text("🎬 Генерирую один тестовый ролик...")
+    await generate_one_test_video()
 
 async def cmd_retry_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1143,6 +1149,7 @@ async def main():
     parser_app.add_handler(CommandHandler("test_publish", cmd_test_publish))
     parser_app.add_handler(CommandHandler("test_generate", cmd_test_generate))
     parser_app.add_handler(CommandHandler("generate_video", cmd_generate_video))
+    parser_app.add_handler(CommandHandler("generate_video_test", cmd_generate_video_test))
     parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
     parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))

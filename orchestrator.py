@@ -436,6 +436,13 @@ async def generate_weekly_batch():
         await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
         await asyncio.sleep(2)
 
+async def generate_one_test_video():
+    """Генерирует один ролик (первая категория недельного расписания) — для
+    быстрой проверки пайплайна без запуска полной недельной генерации."""
+    entry = WEEKLY_SCHEDULE[0]
+    planned_time = f'{entry["hour"]:02d}:{entry["minute"]:02d}'
+    await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
+
 # ── Еженедельное предложение темы для самозаписи (вс, 19:05) ─────────────────
 async def propose_self_record_script():
     global self_record_category_idx
