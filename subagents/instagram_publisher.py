@@ -20,14 +20,19 @@ def _full_caption(parts: dict) -> str:
 
 
 async def upload_photo_to_instagram(photo_path: str, source_text: str, category: str) -> str | None:
-    """Публикует photo_path в Instagram (лента) через Buffer. Файл уже должен
-    быть на web (generate_image пушит его при генерации, image_generator.py) —
-    не пушится повторно здесь. Возвращает ссылку на пост или None."""
+    """Публикует photo_path в Instagram (лента) через Buffer. Возвращает ссылку
+    на пост или None. generate_image пушит фото на web ещё при генерации, но
+    не проверяет результат push_media — при сбое той попытки файл может так и
+    не оказаться на web, поэтому пушим ещё раз здесь (дёшево, push_media просто
+    перезаписывает тот же файл)."""
     if not BUFFER_INSTAGRAM_CHANNEL_ID:
         logger.warning("BUFFER_INSTAGRAM_CHANNEL_ID не задан — пропускаем публикацию в Instagram")
         return None
     if not os.path.exists(photo_path):
         logger.error(f"upload_photo_to_instagram: файл не найден {photo_path}")
+        return None
+    if not await push_media("photos", photo_path):
+        logger.error("upload_photo_to_instagram: не удалось выложить фото на web")
         return None
 
     parts = await generate_instagram_caption(source_text, category, "photo")

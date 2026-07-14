@@ -51,7 +51,7 @@ async def upload_reel_to_instagram(video_path: str, source_text: str, category: 
 ```
 
 Both: skip with a warning (return `None`) if `BUFFER_API_KEY`/`BUFFER_INSTAGRAM_CHANNEL_ID` unset; otherwise generate the caption, then call `publish_to_buffer` with a media URL — obtained differently per type:
-- **Photo:** `generate_image` (`image_generator.py:52`) already calls `push_media("photos", ...)` at generation time, for every generated image, well before `auto_publish` ever runs — by the time Instagram publish is attempted, the file is already on `web`'s side. `upload_photo_to_instagram` builds the URL directly (same `_media_url("photos", photo_path)` helper `tiktok_publisher.py` already has), no redundant push.
+- **Photo — corrected after a live test failure (2026-07-14):** `generate_image` (`image_generator.py:52`) does call `push_media("photos", ...)` at generation time, but never checks the return value — a transient push failure there leaves the file missing on `web` with nothing downstream aware of it. A live `/test_publish` run hit exactly this: Buffer returned `Image URL is not accessible: HTTP 404 Not Found`. `upload_photo_to_instagram` now calls `push_media("photos", photo_path)` itself before building the URL, same as the Reel path — trading a small amount of redundant bandwidth (the file is usually already there) for not silently depending on an unchecked push from earlier in the pipeline.
 - **Reel:** the rendered video is only ever pushed on-demand, inside `tiktok_publisher.py::upload_to_tiktok` today — there's no earlier eager push to piggyback on. `upload_reel_to_instagram` must call `push_media("videos", video_path)` itself, same as `upload_to_tiktok` does.
 
 ## Data flow — photo posts
