@@ -17,6 +17,7 @@ from telegram import Bot, InputFile
 from telegram.ext import ContextTypes
 
 from subagents.tiktok_publisher import upload_to_tiktok
+from subagents.instagram_publisher import upload_reel_to_instagram
 from subagents.tiktok_moderation import check_tiktok_compliance, FAIL_CLOSED_REASON
 from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script
 from subagents.yt_voice import generate_voiceover
@@ -32,6 +33,7 @@ APPROVED_FILE = "/data/approved_videos.json"
 UPLOAD_TOKENS_FILE = "/data/upload_tokens.json"
 PENDING_UPLOADS_FILE = "/data/pending_uploads.json"
 TIKTOK_RETRY_FILE = "/data/tiktok_retry_pending.json"
+INSTAGRAM_RETRY_FILE = "/data/instagram_retry_pending.json"
 FAILED_UPLOADS_FILE = "/data/failed_uploads.json"
 
 KYIV_TZ = ZoneInfo("Europe/Kiev")
@@ -72,6 +74,7 @@ approved_videos: dict = {}
 editing_video_title: dict = {}
 awaiting_self_record_video: dict = {}
 tiktok_retry_pending: dict = {}
+instagram_retry_pending: dict = {}
 failed_uploads: dict = {}
 
 PARSER_BOT_TOKEN = None
@@ -128,6 +131,13 @@ def save_tiktok_retry_pending():
     except Exception as e:
         logger.error(f"Save tiktok retry pending error: {e}")
 
+def save_instagram_retry_pending():
+    try:
+        with open(INSTAGRAM_RETRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(instagram_retry_pending, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save instagram retry pending error: {e}")
+
 def save_failed_uploads():
     try:
         with open(FAILED_UPLOADS_FILE, "w", encoding="utf-8") as f:
@@ -158,6 +168,13 @@ def load_pending_videos():
             logger.info(f"Загружено {len(tiktok_retry_pending)} видео на повтор TikTok")
     except Exception as e:
         logger.error(f"Load tiktok retry pending error: {e}")
+    try:
+        if os.path.exists(INSTAGRAM_RETRY_FILE):
+            with open(INSTAGRAM_RETRY_FILE, "r", encoding="utf-8") as f:
+                instagram_retry_pending.update(json.load(f))
+            logger.info(f"Загружено {len(instagram_retry_pending)} видео на повтор Instagram")
+    except Exception as e:
+        logger.error(f"Load instagram retry pending error: {e}")
     try:
         if os.path.exists(FAILED_UPLOADS_FILE):
             with open(FAILED_UPLOADS_FILE, "r", encoding="utf-8") as f:
@@ -461,9 +478,9 @@ async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str
 
 async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     """После успешной загрузки на YouTube: анонсирует в канале, пробует TikTok
-    (с одной попыткой более лояльного fallback-варианта при блоке), и шлёт
-    админу сводку по обеим площадкам. Общий код для первого одобрения,
-    /retry_videos и запланированной публикации."""
+    (с одной попыткой более лояльного fallback-варианта при блоке) и Instagram
+    Reels, и шлёт админу сводку по всем площадкам. Общий код для первого
+    одобрения, /retry_videos и запланированной публикации."""
     await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
 
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
@@ -476,22 +493,28 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
             status_lines.append(f"✅ TikTok: {tiktok_url} ({note})")
         else:
             status_lines.append(f"⚠️ TikTok пропущен: {block_reason}")
-        try:
-            os.remove(video["video_path"])
-        except Exception:
-            pass
     else:
         tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
         if tiktok_url:
             status_lines.append(f"✅ TikTok: {tiktok_url}")
-            try:
-                os.remove(video["video_path"])
-            except Exception:
-                pass
         else:
             status_lines.append("⚠️ TikTok не удался — /retry_tiktok")
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
+
+    instagram_url = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
+    if instagram_url:
+        status_lines.append(f"✅ Instagram: {instagram_url}")
+    else:
+        status_lines.append("⚠️ Instagram не удался — /retry_instagram")
+        instagram_retry_pending[video_id] = video
+        save_instagram_retry_pending()
+
+    if video_id not in tiktok_retry_pending and video_id not in instagram_retry_pending:
+        try:
+            os.remove(video["video_path"])
+        except Exception:
+            pass
 
     await notify_admin("<b>Видео опубликовано:</b>\n" + "\n".join(status_lines))
 
@@ -538,10 +561,26 @@ async def retry_tiktok_upload(video_id: str):
         return
     tiktok_retry_pending.pop(video_id, None)
     save_tiktok_retry_pending()
-    try:
-        os.remove(video["video_path"])
-    except Exception:
-        pass
+    if video_id not in instagram_retry_pending:
+        try:
+            os.remove(video["video_path"])
+        except Exception:
+            pass
+
+async def retry_instagram_upload(video_id: str):
+    video = instagram_retry_pending.get(video_id)
+    if not video:
+        return
+    instagram_url = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
+    if not instagram_url:
+        return
+    instagram_retry_pending.pop(video_id, None)
+    save_instagram_retry_pending()
+    if video_id not in tiktok_retry_pending:
+        try:
+            os.remove(video["video_path"])
+        except Exception:
+            pass
     await notify_admin(f"✅ <b>TikTok опубликован (повтор)!</b>\n{tiktok_url}")
 
 # ── Токены загрузки для самозаписи (обходим лимит getFile в 20МБ) ───────────
