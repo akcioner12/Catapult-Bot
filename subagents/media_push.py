@@ -1,7 +1,8 @@
 """
 Отправляет сгенерированные медиа-файлы на web (у Catapult-Bot и web разные volume
 на Railway, /data не общий — см. Task 14 диагностику), чтобы web мог раздать их
-JSON2Video через /media.
+по HTTP для TikTok/Buffer и self-record загрузок. Рендер видео (yt_render.py)
+теперь читает эти файлы локально и в этой раздаче не нуждается.
 """
 import os
 import logging

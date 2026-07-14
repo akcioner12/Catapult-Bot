@@ -1,102 +1,117 @@
 """
-Sub-agent: сборка вертикального видео (картинки + озвучка + авто-субтитры) через JSON2Video.
-JSON2Video принимает только публичные HTTPS-ссылки на ассеты — локальные файлы
-раздаются через /media эндпоинт в server.py (см. Task 2 плана).
+Sub-agent: сборка вертикального видео (картинки + озвучка + вшитые субтитры)
+локальным ffmpeg — без стороннего рендер-API. Ken Burns через zoompan,
+субтитры — приблизительный, пофразный тайминг (см. subtitle_builder.py),
+без forced alignment.
 """
-import os
 import asyncio
 import logging
+import os
 
-import httpx
+from subagents.subtitle_builder import build_ass_subtitles
 
 logger = logging.getLogger(__name__)
 
-JSON2VIDEO_API_KEY = os.getenv("JSON2VIDEO_API_KEY", "")
-BACKEND_URL         = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
-MEDIA_SERVE_TOKEN   = os.getenv("MEDIA_SERVE_TOKEN", "")
 VIDEOS_DIR = "/data/videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
-WORDS_PER_SECOND = 2.5  # оценка длительности озвучки по числу слов — mp3 не декодируем
+FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts")
 
-def _media_url(kind: str, local_path: str) -> str:
-    filename = os.path.basename(local_path)
-    return f"{BACKEND_URL}/media/{kind}/{filename}?token={MEDIA_SERVE_TOKEN}"
+RENDER_TIMEOUT_SECONDS = 300
+FPS = 25
+
+
+def _escape_ffmpeg_path(path: str) -> str:
+    """ffmpeg filter option values treat ':' as a separator — Windows paths
+    (C:\\...) need it escaped; a no-op on Railway's Linux paths."""
+    return path.replace("\\", "/").replace(":", "\\:")
+
+
+async def _ffprobe_duration(path: str) -> float:
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {stderr.decode()}")
+    return float(stdout.decode().strip())
+
+
+def _build_ffmpeg_command(image_paths: list[str], audio_path: str, ass_path: str, audio_duration: float, output_path: str) -> list[str]:
+    duration_per_image = audio_duration / len(image_paths)
+    frames = max(int(duration_per_image * FPS), 1)
+
+    cmd = ["ffmpeg", "-y"]
+    for path in image_paths:
+        cmd += ["-loop", "1", "-t", f"{duration_per_image:.3f}", "-i", path]
+    cmd += ["-i", audio_path]
+
+    filter_chains = []
+    labels = []
+    for i in range(len(image_paths)):
+        # чередуем направление панорамирования — рецепт из документации ffmpeg
+        # zoompan: старт на первом кадре (on==1), затем инкремент/декремент x за кадром
+        if i % 2 == 0:
+            x_expr = "if(eq(on,1),0,x+1)"
+        else:
+            x_expr = "if(eq(on,1),(iw-iw/zoom),x-1)"
+        label = f"v{i}"
+        filter_chains.append(
+            f"[{i}:v]scale=2160:3840:flags=lanczos,"
+            f"zoompan=z='min(zoom+0.0015,1.2)':d={frames}:"
+            f"x='{x_expr}':y='ih/2-(ih/zoom/2)':s=1080x1920:fps={FPS},setsar=1[{label}]"
+        )
+        labels.append(f"[{label}]")
+
+    concat_inputs = "".join(labels)
+    filter_chains.append(f"{concat_inputs}concat=n={len(image_paths)}:v=1:a=0[vconcat]")
+    filter_chains.append(
+        f"[vconcat]subtitles='{_escape_ffmpeg_path(ass_path)}':fontsdir='{_escape_ffmpeg_path(FONTS_DIR)}'[vout]"
+    )
+
+    audio_index = len(image_paths)
+    cmd += [
+        "-filter_complex", ";".join(filter_chains),
+        "-map", "[vout]",
+        "-map", f"{audio_index}:a",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        output_path,
+    ]
+    return cmd
+
 
 async def render_video(script_text: str, image_paths: list[str], audio_path: str, filename: str) -> str | None:
-    """Рендерит вертикальное видео 1080x1920 через JSON2Video. None при сбое/нехватке кредитов/таймауте."""
-    if not JSON2VIDEO_API_KEY:
-        logger.warning("JSON2VIDEO_API_KEY не задан — пропускаем рендер видео")
-        return None
+    """Рендерит вертикальное видео 1080x1920 локальным ffmpeg. None при сбое/таймауте."""
     if not image_paths or not audio_path:
         logger.warning("render_video: нет картинок или озвучки — пропускаем")
         return None
 
-    total_seconds = max(len(script_text.split()) / WORDS_PER_SECOND, len(image_paths) * 3)
-    duration_per_image = total_seconds / len(image_paths)
-
-    movie = {
-        "resolution": "custom",
-        "width": 1080,
-        "height": 1920,
-        "scenes": [
-            {
-                "elements": [{
-                    "type": "image",
-                    "src": _media_url("photos", path),
-                    "duration": duration_per_image,
-                    "position": "center-center",
-                    "resize": "cover",
-                    "zoom": 2,
-                    "pan": "right" if i % 2 == 0 else "left",
-                }]
-            }
-            for i, path in enumerate(image_paths)
-        ],
-        "elements": [
-            {"type": "audio", "src": _media_url("audio", audio_path), "duration": -1},
-            {"type": "subtitles"},
-        ],
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.json2video.com/v2/movies",
-                headers={"x-api-key": JSON2VIDEO_API_KEY, "Content-Type": "application/json"},
-                json=movie,
-            )
-            if resp.status_code in (402, 429):
-                logger.warning(f"JSON2Video: нет кредитов/лимит ({resp.status_code}) — пропускаем рендер")
-                return None
-            data = resp.json()
-            project_id = data.get("project")
-            if not project_id:
-                logger.error(f"JSON2Video: не удалось создать проект: {data}")
-                return None
+        audio_duration = await _ffprobe_duration(audio_path)
+        ass_path = f"{VIDEOS_DIR}/{filename}.ass"
+        build_ass_subtitles(script_text, audio_duration, ass_path)
 
-            for _ in range(60):  # до ~10 минут ожидания рендера
-                await asyncio.sleep(10)
-                status_resp = await client.get(
-                    "https://api.json2video.com/v2/movies",
-                    headers={"x-api-key": JSON2VIDEO_API_KEY},
-                    params={"project": project_id},
-                )
-                movie_status = status_resp.json().get("movie", {})
-                status = movie_status.get("status")
-                if status == "done":
-                    video_resp = await client.get(movie_status["url"])
-                    local_path = f"{VIDEOS_DIR}/{filename}.mp4"
-                    with open(local_path, "wb") as f:
-                        f.write(video_resp.content)
-                    logger.info(f"✅ Видео отрендерено: {local_path}")
-                    return local_path
-                if status in ("error", "timeout"):
-                    logger.error(f"JSON2Video render failed: {movie_status.get('message')}")
-                    return None
+        output_path = f"{VIDEOS_DIR}/{filename}.mp4"
+        cmd = _build_ffmpeg_command(image_paths, audio_path, ass_path, audio_duration, output_path)
 
-            logger.error("JSON2Video: рендер не завершился за отведённое время")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT_SECONDS)
+        if proc.returncode != 0:
+            logger.error(f"ffmpeg render failed: {stderr.decode()[-2000:]}")
             return None
+
+        logger.info(f"✅ Видео отрендерено: {output_path}")
+        return output_path
+    except asyncio.TimeoutError:
+        logger.error(f"render_video: рендер не завершился за {RENDER_TIMEOUT_SECONDS}с")
+        return None
     except Exception as e:
         logger.error(f"render_video error: {e}")
         return None
