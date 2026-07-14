@@ -655,6 +655,18 @@ async def publish_now(post: dict):
                 try:
                     with open(post["photo_path"], "rb") as photo_file:
                         await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                    instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                    if instagram_url:
+                        logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
+                    else:
+                        await client.post(
+                            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                            json={
+                                "chat_id": ADMIN_TG_ID,
+                                "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                "parse_mode": "HTML",
+                            },
+                        )
                     try:
                         os.remove(post["photo_path"])
                     except Exception:
