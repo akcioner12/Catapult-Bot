@@ -7,7 +7,7 @@ import os
 import json
 import asyncio
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import httpx
 
@@ -20,7 +20,7 @@ from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
-from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads, WEEKLY_SCHEDULE, lookup_schedule_slot, notify_admin
+from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads, WEEKLY_SCHEDULE, lookup_schedule_slot, notify_admin, KYIV_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +376,9 @@ async def evening_generation():
             }
         )
 
-# ── Еженедельная генерация 14 видео (вс, 19:10) ───────────────────────────────
+    await generate_tomorrows_videos()
+
+# ── Еженедельная генерация 14 видео (только ручной запуск через /generate_video) ──
 async def _generate_and_queue_video(category: str, planned_day: str, planned_time: str):
     posts = await collect_top_posts(category)
 
@@ -442,6 +444,20 @@ async def generate_one_test_video():
     entry = WEEKLY_SCHEDULE[0]
     planned_time = f'{entry["hour"]:02d}:{entry["minute"]:02d}'
     await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
+
+# ── Ежедневная генерация видео на завтра (часть evening_generation) ──────────
+async def generate_tomorrows_videos():
+    """Генерирует 1-2 ролика на завтра — категории берутся из WEEKLY_SCHEDULE
+    по дню недели. Заменяет собой воскресный взрыв всех 14 сразу: видео теперь
+    генерируется за день до публикации, как и текстовые посты, а не на неделю
+    вперёд — иначе горячая тема успевает устареть к своему плановому слоту."""
+    tomorrow = datetime.now(KYIV_TZ) + timedelta(days=1)
+    day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][tomorrow.weekday()]
+    entries = [e for e in WEEKLY_SCHEDULE if e["day"] == day_key]
+    for entry in entries:
+        planned_time = f'{entry["hour"]:02d}:{entry["minute"]:02d}'
+        await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
+        await asyncio.sleep(2)
 
 # ── Еженедельное предложение темы для самозаписи (вс, 19:05) ─────────────────
 async def propose_self_record_script():

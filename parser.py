@@ -1167,7 +1167,7 @@ async def main():
     parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
     parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
-    parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit)_"))
+    parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit|vpublishnow)_"))
     parser_app.add_handler(MessageHandler(filters.VIDEO & filters.User(ADMIN_TG_ID), handle_video_file))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
     parser_app.add_handler(CallbackQueryHandler(handle_queue_action, pattern="^(qpreview|qcancel|qeditphoto|qedit)_"))
@@ -1207,9 +1207,6 @@ async def main():
 
     # Проверка горячих новостей каждый час
     scheduler.add_job(check_breaking_news, "interval", hours=1)
-
-    # Еженедельная генерация 14 видео (вс, 19:10 — сразу после контент-плана в 19:00)
-    scheduler.add_job(generate_weekly_batch, "cron", day_of_week="sun", hour=19, minute=10)
 
     # Публикация по расписанию из очереди одобренных видео
     scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=8,  minute=30, args=["forex"])

@@ -187,7 +187,8 @@ def load_pending_videos():
 def video_approval_keyboard(video_id: str) -> dict:
     return {
         "inline_keyboard": [[
-            {"text": "✅ Одобрить и опубликовать", "callback_data": f"vapprove_{video_id}"},
+            {"text": "✅ В очередь", "callback_data": f"vapprove_{video_id}"},
+            {"text": "🚀 Опубликовать сейчас", "callback_data": f"vpublishnow_{video_id}"},
         ], [
             {"text": "✏️ Изменить название", "callback_data": f"vedit_{video_id}"},
             {"text": "❌ Отменить", "callback_data": f"vcancel_{video_id}"},
@@ -278,6 +279,21 @@ async def handle_video_approval(update, context: ContextTypes.DEFAULT_TYPE):
         pending_videos.pop(video_id, None)
         save_pending_videos()
         await _edit_status(query, "❌ Видео отменено.")
+
+    elif action == "vpublishnow":
+        pending_videos.pop(video_id, None)
+        save_pending_videos()
+        await _edit_status(query, "🚀 Публикую немедленно...")
+        youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
+        if youtube_id:
+            await _finish_publish(video_id, video, youtube_id)
+        else:
+            failed_uploads[video_id] = video
+            save_failed_uploads()
+            await notify_admin("❌ Загрузка на YouTube не удалась при немедленной публикации. Попробуй /retry_videos позже.")
+        if video.get("planned_day") and video.get("planned_time"):
+            from orchestrator import _generate_and_queue_video
+            asyncio.create_task(_generate_and_queue_video(video["category"], video["planned_day"], video["planned_time"]))
 
 # ── Обработчик текста при редактировании названия ────────────────────────────
 async def handle_video_title_edit(update, context: ContextTypes.DEFAULT_TYPE):
