@@ -28,7 +28,7 @@
 - Produces: `publish_to_buffer(channel_id: str, caption: str, media_url: str, media_type: str) -> str | None` (`media_type` is `"video"` or `"image"`). `media_push.media_url(kind: str, local_path: str) -> str`.
 - Consumes: nothing new — `BACKEND_URL`/`MEDIA_SERVE_TOKEN` already exist in `media_push.py`.
 
-- [ ] **Step 1: Add `media_url` to `subagents/media_push.py`**
+- [x] **Step 1: Add `media_url` to `subagents/media_push.py`**
 
 Add at the end of the file (after `push_media`):
 
@@ -38,7 +38,7 @@ def media_url(kind: str, local_path: str) -> str:
     return f"{BACKEND_URL}/media/{kind}/{filename}?token={MEDIA_SERVE_TOKEN}"
 ```
 
-- [ ] **Step 2: Create `subagents/buffer_publisher.py`**
+- [x] **Step 2: Create `subagents/buffer_publisher.py`**
 
 ```python
 """
@@ -137,12 +137,12 @@ async def publish_to_buffer(channel_id: str, caption: str, media_url: str, media
         return None
 ```
 
-- [ ] **Step 3: Verify syntax**
+- [x] **Step 3: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile subagents/buffer_publisher.py subagents/media_push.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 4: Manual verification (shape only, no live post)**
+- [x] **Step 4: Manual verification (shape only, no live post)**
 
 ```bash
 python -c "
@@ -159,7 +159,7 @@ print('OK')
 
 Expected: prints the built URL (`.../media/photos/test.jpg?token=`), then `OK` — confirms the missing-config path returns `None` without raising, and `media_url` builds the expected shape. No real Buffer call is made (no channel exists named `'some_channel'`, and if `BUFFER_API_KEY` happens to be set in this shell, this assert would fail loudly rather than silently posting anything — nothing is published either way since `'some_channel'` isn't a real channel id).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add subagents/buffer_publisher.py subagents/media_push.py
@@ -177,7 +177,7 @@ git commit -m "feat: extract shared Buffer publish helper from tiktok_publisher"
 - Consumes: `buffer_publisher.publish_to_buffer` (Task 1), `media_push.push_media`/`media_url`.
 - Produces: `upload_to_tiktok(video_path: str, caption: str) -> str | None` — **unchanged signature**, so `yt_publisher.py`'s existing `from subagents.tiktok_publisher import upload_to_tiktok` and all its call sites need no changes.
 
-- [ ] **Step 1: Replace `subagents/tiktok_publisher.py` contents**
+- [x] **Step 1: Replace `subagents/tiktok_publisher.py` contents**
 
 ```python
 """
@@ -211,7 +211,7 @@ async def upload_to_tiktok(video_path: str, caption: str) -> str | None:
     return await publish_to_buffer(BUFFER_TIKTOK_CHANNEL_ID, caption, media_url("videos", video_path), "video")
 ```
 
-- [ ] **Step 2: Verify syntax and unchanged interface**
+- [x] **Step 2: Verify syntax and unchanged interface**
 
 ```bash
 cd catapult-bot-git && python -m py_compile subagents/tiktok_publisher.py
@@ -228,7 +228,7 @@ Expected: `OK` — confirms the function signature callers depend on (`yt_publis
 
 **Not live-tested here on purpose:** re-running a real TikTok post just to verify this mechanical refactor would spam the live `crypto_ai_forex` TikTok channel for no new behavior. Task 8's end-to-end pass exercises this same code path for real when it verifies Reels, so an equivalence check (Step 2 above) plus a read-through diff against the pre-refactor version is sufficient here — the diff shows the same three guard checks in the same order (`BUFFER_TIKTOK_CHANNEL_ID` → file exists → push succeeds), same GraphQL mutation/polling behavior (now inside `publish_to_buffer`, called with the same arguments in the same order), no logic removed or reordered.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add subagents/tiktok_publisher.py
@@ -246,7 +246,7 @@ git commit -m "refactor: route tiktok_publisher through the shared buffer_publis
 - Consumes: `CLAUDE_API_KEY`, `CLAUDE_API_URL` from `subagents.rewriter` (already used by `image_brief.py`/`yt_script.py` the same way).
 - Produces: `generate_instagram_caption(source_text: str, category: str, content_type: str) -> dict` — always returns `{"caption": str, "hashtags": list[str]}`, never raises. `content_type` is `"photo"` or `"reel"`.
 
-- [ ] **Step 1: Create `subagents/instagram_caption.py`**
+- [x] **Step 1: Create `subagents/instagram_caption.py`**
 
 ```python
 """
@@ -323,12 +323,12 @@ def _parse_caption(raw: str, fallback_text: str) -> dict:
     return {"caption": caption, "hashtags": hashtags}
 ```
 
-- [ ] **Step 2: Verify syntax**
+- [x] **Step 2: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile subagents/instagram_caption.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 3: Unit-level check of the parser (no network)**
+- [x] **Step 3: Unit-level check of the parser (no network)**
 
 ```bash
 python -c "
@@ -346,7 +346,7 @@ print('OK')
 
 Expected: `OK`.
 
-- [ ] **Step 4: Manual verification — real Claude call**
+- [x] **Step 4: Manual verification — real Claude call**
 
 `CLAUDE_API_KEY` is already configured in this environment (used by `image_brief.py` etc.), so this call is real but harmless — it only generates text, nothing gets posted anywhere:
 
@@ -367,7 +367,7 @@ print('OK')
 
 Expected: prints a dict with a real generated caption and a non-empty hashtag list, then `OK`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add subagents/instagram_caption.py
@@ -385,7 +385,7 @@ git commit -m "feat: add generate_instagram_caption for Instagram SEO captions/h
 - Consumes: `buffer_publisher.publish_to_buffer` (Task 1), `media_push.push_media`/`media_url`, `instagram_caption.generate_instagram_caption` (Task 3).
 - Produces: `upload_photo_to_instagram(photo_path: str, source_text: str, category: str) -> str | None`, `upload_reel_to_instagram(video_path: str, source_text: str, category: str) -> str | None`.
 
-- [ ] **Step 1: Create `subagents/instagram_publisher.py`**
+- [x] **Step 1: Create `subagents/instagram_publisher.py`**
 
 ```python
 """
@@ -445,12 +445,12 @@ async def upload_reel_to_instagram(video_path: str, source_text: str, category: 
     )
 ```
 
-- [ ] **Step 2: Verify syntax**
+- [x] **Step 2: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile subagents/instagram_publisher.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 3: Manual verification (import + missing-file guard, no live post)**
+- [x] **Step 3: Manual verification (import + missing-file guard, no live post)**
 
 ```bash
 python -c "
@@ -465,7 +465,7 @@ print('OK')
 
 Expected: `OK`. This deliberately does not exercise a real Buffer post — that happens once, end-to-end, in Task 8, after this module is actually wired into the publish flows (Tasks 5-6) so the whole chain gets validated together instead of in an artificial standalone call.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add subagents/instagram_publisher.py
@@ -482,7 +482,7 @@ git commit -m "feat: add instagram_publisher for photo/Reel publishing via Buffe
 **Interfaces:**
 - Consumes: `instagram_publisher.upload_photo_to_instagram` (Task 4).
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 In `subagents/tg_publisher.py`, after line 22 (`from subagents.rewriter import generate_catapult_post, generate_post_claude, CATAPULT_ANGLES`), add:
 
@@ -490,7 +490,7 @@ In `subagents/tg_publisher.py`, after line 22 (`from subagents.rewriter import g
 from subagents.instagram_publisher import upload_photo_to_instagram
 ```
 
-- [ ] **Step 2: Wire the poll branch**
+- [x] **Step 2: Wire the poll branch**
 
 Find (around line 709-720):
 
@@ -538,7 +538,7 @@ Replace with:
                         logger.warning(f"poll sendPhoto failed: {photo_err}")
 ```
 
-- [ ] **Step 3: Wire the regular (non-poll) branch**
+- [x] **Step 3: Wire the regular (non-poll) branch**
 
 Find (around line 730-746):
 
@@ -596,12 +596,12 @@ Replace with:
                     logger.warning(f"sendPhoto failed: {photo_err}, публикую без картинки")
 ```
 
-- [ ] **Step 4: Verify syntax**
+- [x] **Step 4: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile subagents/tg_publisher.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 5: Manual verification — confirm both edit sites landed correctly**
+- [x] **Step 5: Manual verification — confirm both edit sites landed correctly**
 
 ```bash
 python -c "
@@ -615,7 +615,7 @@ print('OK')
 
 Expected: `OK` — confirms the call was added to both branches and the file still parses as valid Python.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add subagents/tg_publisher.py
@@ -633,7 +633,7 @@ git commit -m "feat: publish approved photo posts to Instagram alongside Telegra
 - Consumes: `instagram_publisher.upload_reel_to_instagram` (Task 4).
 - Produces: `instagram_retry_pending: dict`, `save_instagram_retry_pending()`, `retry_instagram_upload(video_id: str)`.
 
-- [ ] **Step 1: Add the import**
+- [x] **Step 1: Add the import**
 
 In `subagents/yt_publisher.py`, line 19 currently reads:
 
@@ -647,7 +647,7 @@ Add directly below it:
 from subagents.instagram_publisher import upload_reel_to_instagram
 ```
 
-- [ ] **Step 2: Add the retry-pending file constant and dict**
+- [x] **Step 2: Add the retry-pending file constant and dict**
 
 Line 34 currently reads `TIKTOK_RETRY_FILE = "/data/tiktok_retry_pending.json"` — add directly below it:
 
@@ -661,7 +661,7 @@ Line 74 currently reads `tiktok_retry_pending: dict = {}` — add directly below
 instagram_retry_pending: dict = {}
 ```
 
-- [ ] **Step 3: Add `save_instagram_retry_pending`**
+- [x] **Step 3: Add `save_instagram_retry_pending`**
 
 After `save_tiktok_retry_pending` (lines 124-129), add:
 
@@ -674,7 +674,7 @@ def save_instagram_retry_pending():
         logger.error(f"Save instagram retry pending error: {e}")
 ```
 
-- [ ] **Step 4: Load it at startup**
+- [x] **Step 4: Load it at startup**
 
 Inside `load_pending_videos()`, after the `TIKTOK_RETRY_FILE` block (lines 154-160) and before the `FAILED_UPLOADS_FILE` block, add:
 
@@ -688,7 +688,7 @@ Inside `load_pending_videos()`, after the `TIKTOK_RETRY_FILE` block (lines 154-1
         logger.error(f"Load instagram retry pending error: {e}")
 ```
 
-- [ ] **Step 5: Rewrite `_finish_publish`**
+- [x] **Step 5: Rewrite `_finish_publish`**
 
 Replace the whole function (lines 462-496):
 
@@ -738,7 +738,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
 
 This replaces the two scattered `os.remove(video["video_path"])` calls that used to live inside each branch (one unconditional in the `block_reason` branch, one gated on `tiktok_url` in the `else` branch) with a single delete at the end, gated on *neither* platform having a pending retry — see the design spec's "File-lifecycle fix" section for why: the old per-branch deletes were correct when TikTok was the only retry-capable consumer of `video["video_path"]`, but a second one (Instagram) means whichever platform's attempt finishes must not delete a file the other still needs.
 
-- [ ] **Step 6: Fix `retry_tiktok_upload` and add `retry_instagram_upload`**
+- [x] **Step 6: Fix `retry_tiktok_upload` and add `retry_instagram_upload`**
 
 Replace `retry_tiktok_upload` (lines 532-544):
 
@@ -774,12 +774,12 @@ async def retry_instagram_upload(video_id: str):
             pass
 ```
 
-- [ ] **Step 7: Verify syntax**
+- [x] **Step 7: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile subagents/yt_publisher.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 8: Manual verification — file-lifecycle guard logic in isolation**
+- [x] **Step 8: Manual verification — file-lifecycle guard logic in isolation**
 
 This is the bug found during the spec's self-review — worth a dedicated check that doesn't depend on any network call:
 
@@ -812,7 +812,7 @@ print('OK')
 
 Expected: `OK` — proves the guard logic added in Steps 5-6 actually prevents the premature-delete bug the self-review found, without needing a real video file or any network call.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add subagents/yt_publisher.py
@@ -829,7 +829,7 @@ git commit -m "feat: publish approved Reels to Instagram, fix shared video-file 
 **Interfaces:**
 - Consumes: `yt_publisher.instagram_retry_pending`, `yt_publisher.retry_instagram_upload` (Task 6).
 
-- [ ] **Step 1: Extend the existing `yt_publisher` import**
+- [x] **Step 1: Extend the existing `yt_publisher` import**
 
 `parser.py` already has (per the current `feature/youtube-shorts-pipeline` merge):
 
@@ -852,7 +852,7 @@ from subagents.yt_publisher import (
 
 (Exact current import block may have additional names from other work landed on `main` since — add `instagram_retry_pending` to whatever the block looks like at implementation time; don't remove anything already there.)
 
-- [ ] **Step 2: Add `cmd_retry_instagram`**
+- [x] **Step 2: Add `cmd_retry_instagram`**
 
 Directly after `cmd_retry_tiktok` (currently at parser.py lines 127-135), add:
 
@@ -868,7 +868,7 @@ async def cmd_retry_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE
         await yt_publisher.retry_instagram_upload(video_id)
 ```
 
-- [ ] **Step 3: Register the command handler**
+- [x] **Step 3: Register the command handler**
 
 Find `parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))` (currently line 1137) and add directly below it:
 
@@ -876,12 +876,12 @@ Find `parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))` 
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
 ```
 
-- [ ] **Step 4: Verify syntax**
+- [x] **Step 4: Verify syntax**
 
 Run: `cd catapult-bot-git && python -m py_compile parser.py`
 Expected: no output, exit code 0.
 
-- [ ] **Step 5: Manual verification**
+- [x] **Step 5: Manual verification**
 
 ```bash
 python -c "
@@ -897,7 +897,7 @@ print('OK')
 
 Expected: `OK`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add parser.py
@@ -912,29 +912,29 @@ git commit -m "feat: add /retry_instagram admin command"
 
 This is the point analogous to the YouTube Shorts pipeline's own Task 14 — the first real posts to the live `@crypto.ai.forex` Instagram account happen here, not before. Confirm with the user before running Steps 2-3.
 
-- [ ] **Step 1: Deploy**
+- [x] **Step 1: Deploy**
 
 Push the branch to `main` (or merge if working on a feature branch) and let Railway deploy `Catapult-Bot`. Stop `exciting-patience` afterward (it wakes on every push and conflicts with the bot's `getUpdates` — same as every other deploy in this project).
 
-- [ ] **Step 2: Verify a real photo post**
+- [x] **Step 2: Verify a real photo post**
 
 Trigger a normal photo-post publish (either wait for the next scheduled slot, or use `/test_publish` if a post is already approved and queued). Confirm:
 - The photo appears on Telegram as before (unaffected).
 - Within a minute or two, the same photo appears on `instagram.com/crypto.ai.forex` as a feed post, with a Claude-generated caption + hashtags (not the raw Telegram post text verbatim).
 - This is also the first live confirmation of the `assets: [{"image": {...}}]` shape the spec flagged as unverified — if Buffer rejects it, check the error against Buffer's actual schema (introspect `CreatePostInput`'s `assets` field type) and adjust `buffer_publisher.py`'s asset-building accordingly.
 
-- [ ] **Step 3: Verify a real Reel**
+- [x] **Step 3: Verify a real Reel**
 
 Trigger `/generate_video`, approve the resulting video. Confirm:
 - YouTube and TikTok publish as before (unaffected — Task 2's refactor gets its real live confirmation here too).
 - Within a couple minutes, the same video appears as a Reel on `instagram.com/crypto.ai.forex`, with its own Claude-generated caption.
 
-- [ ] **Step 4: Verify the failure/retry path**
+- [x] **Step 4: Verify the failure/retry path**
 
 Temporarily set `BUFFER_INSTAGRAM_CHANNEL_ID` to an invalid value on Railway, trigger one more photo post and one more video, confirm:
 - Both still publish successfully everywhere else (Telegram/YouTube/TikTok) — Instagram is skipped with a warning, admin gets the "⚠️ Не удалось опубликовать фото-пост в Instagram" message for the photo, and `/retry_instagram` reports the pending video by name for the Reel.
 - Restore the real `BUFFER_INSTAGRAM_CHANNEL_ID` value, run `/retry_instagram`, confirm the pending Reel now publishes.
 
-- [ ] **Step 5: Confirm with the user**
+- [x] **Step 5: Confirm with the user**
 
 Report back what was verified (with actual Instagram post links) before considering this plan complete.
