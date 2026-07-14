@@ -20,6 +20,13 @@ CATEGORY_STYLE = {
 
 # ── ТЗ для картинки ───────────────────────────────────────────────────────────
 async def generate_image_brief(post_text: str, category: str) -> str:
+    if category == "catapult":
+        # Catapult — фиксированный брендовый визуал, не зависит от конкретного
+        # поста. Отдаём стиль напрямую, без прогона через Claude: раньше модель
+        # иногда подменяла катапульту ракетой, если пост описывал "запуск"/
+        # "взлёт" — теперь это невозможно в принципе.
+        return CATEGORY_STYLE["catapult"]
+
     style = CATEGORY_STYLE.get(category, CATEGORY_STYLE["crypto"])
     prompt = f"""На основе этого поста составь короткое ТЗ для дизайнера/Midjourney на создание картинки.
 
