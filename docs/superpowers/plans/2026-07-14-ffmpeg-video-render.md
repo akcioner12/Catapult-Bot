@@ -26,18 +26,18 @@
 **Interfaces:**
 - Produces: a working local `ffmpeg`/`ffprobe` on the dev machine (needed by Task 3's real render test) and `ffmpeg`/`ffprobe` present at runtime on the `Catapult-Bot` Railway service (needed by Task 4).
 
-- [ ] **Step 1: Check for local ffmpeg**
+- [x] **Step 1: Check for local ffmpeg**
 
 Run: `ffmpeg -version`
 Expected: either a version banner (skip to Step 3), or `command not found` (continue to Step 2).
 
-- [ ] **Step 2: Install ffmpeg locally (Windows dev machine)**
+- [x] **Step 2: Install ffmpeg locally (Windows dev machine)**
 
 Run: `winget install --id Gyan.FFmpeg -e`
 
 After install, open a new shell (PATH needs to refresh) and re-run `ffmpeg -version` and `ffprobe -version` — both must print a version banner before continuing to Task 3.
 
-- [ ] **Step 3: Set the Railway runtime apt package for Catapult-Bot**
+- [x] **Step 3: Set the Railway runtime apt package for Catapult-Bot**
 
 Run (from anywhere, using the project/service/environment IDs below — confirm they still match `railway status` first, since these can change):
 
@@ -50,7 +50,7 @@ railway variables --set "RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg" --skip-deploys \
 
 `--skip-deploys` is required — this project has a known incident (see project memory) where `variable set` without it triggered an unwanted redeploy from `main` instead of the branch under test. The variable will be picked up on the next explicit deploy (Task 4).
 
-- [ ] **Step 4: No commit for this task** (no repo files changed).
+- [x] **Step 4: No commit for this task** (no repo files changed).
 
 ---
 
@@ -62,7 +62,7 @@ railway variables --set "RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg" --skip-deploys \
 **Interfaces:**
 - Produces: `build_ass_subtitles(script_text: str, audio_duration: float, output_path: str) -> None` — writes an `.ass` subtitle file to `output_path`. Consumed by Task 3.
 
-- [ ] **Step 1: Write the verification script and run it (expect failure — module doesn't exist yet)**
+- [x] **Step 1: Write the verification script and run it (expect failure — module doesn't exist yet)**
 
 Run this via a heredoc so nothing extra is committed to the repo:
 
@@ -91,7 +91,7 @@ EOF
 
 Expected: `ModuleNotFoundError: No module named 'subagents.subtitle_builder'`
 
-- [ ] **Step 2: Implement `subagents/subtitle_builder.py`**
+- [x] **Step 2: Implement `subagents/subtitle_builder.py`**
 
 ```python
 """
@@ -144,11 +144,11 @@ def build_ass_subtitles(script_text: str, audio_duration: float, output_path: st
         f.writelines(lines)
 ```
 
-- [ ] **Step 3: Re-run the verification script from Step 1**
+- [x] **Step 3: Re-run the verification script from Step 1**
 
 Expected: `OK` printed, no assertion errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add subagents/subtitle_builder.py
@@ -165,7 +165,7 @@ git commit -m "feat: add phrase-timed .ass subtitle builder for local video rend
 **Interfaces:**
 - Produces: a Cyrillic-capable font file at a fixed repo-relative path, consumed by Task 4's `ffmpeg` `subtitles` filter (`fontsdir`).
 
-- [ ] **Step 1: Download DejaVu Sans Bold**
+- [x] **Step 1: Download DejaVu Sans Bold**
 
 DejaVu Fonts is the standard permissively-licensed (public-domain-derived, redistribution explicitly allowed) font family with full Cyrillic coverage. Download the official release archive and extract only the one file needed:
 
@@ -176,12 +176,12 @@ unzip -p /tmp/dejavu.zip "dejavu-fonts-ttf-2.37/ttf/DejaVuSans-Bold.ttf" > asset
 rm /tmp/dejavu.zip
 ```
 
-- [ ] **Step 2: Verify the file**
+- [x] **Step 2: Verify the file**
 
 Run: `file assets/fonts/DejaVuSans-Bold.ttf`
 Expected: output mentions `TrueType` (confirms it's a real font file, not an HTML error page from a bad download).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add assets/fonts/DejaVuSans-Bold.ttf
@@ -200,7 +200,7 @@ git commit -m "feat: bundle DejaVu Sans Bold for burned-in subtitle rendering"
 - Consumes: `build_ass_subtitles(script_text, audio_duration, output_path) -> None` (Task 2).
 - Produces: `render_video(script_text: str, image_paths: list[str], audio_path: str, filename: str) -> str | None` — unchanged signature/contract, consumed by `orchestrator.py:414` and `subagents/yt_publisher.py:414` (no changes needed there).
 
-- [ ] **Step 1: Write the verification script and run it (expect failure — old JSON2Video code has no local-render behavior to satisfy this)**
+- [x] **Step 1: Write the verification script and run it (expect failure — old JSON2Video code has no local-render behavior to satisfy this)**
 
 ```bash
 python3 - <<'EOF'
@@ -238,7 +238,7 @@ EOF
 
 Expected: fails (old implementation tries to call the JSON2Video API and either errors on a missing/invalid key or returns `None`).
 
-- [ ] **Step 2: Rewrite `subagents/yt_render.py`**
+- [x] **Step 2: Rewrite `subagents/yt_render.py`**
 
 ```python
 """
@@ -360,7 +360,7 @@ async def render_video(script_text: str, image_paths: list[str], audio_path: str
         return None
 ```
 
-- [ ] **Step 3: Update the stale docstring in `subagents/media_push.py`**
+- [x] **Step 3: Update the stale docstring in `subagents/media_push.py`**
 
 The current docstring says files are pushed to `web` so it can serve them to JSON2Video — that's no longer true for rendering (only TikTok/Buffer and self-record uploads still need it). Replace:
 
@@ -383,11 +383,11 @@ with:
 """
 ```
 
-- [ ] **Step 4: Re-run the verification script from Step 1**
+- [x] **Step 4: Re-run the verification script from Step 1**
 
 Expected: `OK` printed — confirms a real synthetic render (blue image → red image, tone audio, burned-in subtitles) succeeds end to end using only free, local `ffmpeg`-generated inputs.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add subagents/yt_render.py subagents/media_push.py
@@ -402,7 +402,7 @@ git commit -m "feat: render video locally with ffmpeg instead of JSON2Video"
 
 **Interfaces:** none new — this task verifies Task 1/4's work actually functions in the real Railway environment.
 
-- [ ] **Step 1: One-off deploy of this branch to `Catapult-Bot`**
+- [x] **Step 1: One-off deploy of this branch to `Catapult-Bot`**
 
 From the branch checkout (not `main` — this mirrors the project's established pattern of testing a branch on Railway via `railway up` without merging, so `main`/production traffic source is untouched):
 
@@ -414,7 +414,7 @@ railway up --service 82216bd1-88e4-4581-b1d1-dcc60dc6340d \
 
 Expected: build succeeds, deploy status SUCCESS.
 
-- [ ] **Step 2: Confirm ffmpeg is present in the deployed container**
+- [x] **Step 2: Confirm ffmpeg is present in the deployed container**
 
 ```bash
 railway ssh -s Catapult-Bot -- ffmpeg -version
@@ -422,7 +422,7 @@ railway ssh -s Catapult-Bot -- ffmpeg -version
 
 Expected: a version banner (confirms `RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg` from Task 1 actually took effect on this deploy).
 
-- [ ] **Step 3: Run the same synthetic render remotely**
+- [x] **Step 3: Run the same synthetic render remotely**
 
 ```bash
 railway ssh -s Catapult-Bot -- bash -c "ffmpeg -y -f lavfi -i 'sine=frequency=440:duration=6' /tmp/audio.mp3 && ffmpeg -y -f lavfi -i 'color=c=blue:s=1080x1920:d=1' -frames:v 1 /tmp/img1.png && ffmpeg -y -f lavfi -i 'color=c=red:s=1080x1920:d=1' -frames:v 1 /tmp/img2.png"
@@ -434,10 +434,10 @@ railway ssh -s Catapult-Bot -- python3 -c "import asyncio; from subagents.yt_ren
 
 Expected: `RESULT: /data/videos/railway_smoketest.mp4` (not `None`).
 
-- [ ] **Step 4: Clean up the smoke-test artifacts**
+- [x] **Step 4: Clean up the smoke-test artifacts**
 
 ```bash
 railway ssh -s Catapult-Bot -- rm -f /tmp/audio.mp3 /tmp/img1.png /tmp/img2.png /data/videos/railway_smoketest.mp4 /data/videos/railway_smoketest.ass
 ```
 
-- [ ] **Step 5: No commit for this task** (deployment/verification only — the branch is not merged to `main` here; that decision happens separately once the user has reviewed everything, same as the original YouTube Shorts pipeline branch was handled).
+- [x] **Step 5: No commit for this task** (deployment/verification only — the branch is not merged to `main` here; that decision happens separately once the user has reviewed everything, same as the original YouTube Shorts pipeline branch was handled).
