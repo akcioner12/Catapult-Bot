@@ -14,16 +14,15 @@ Replace `render_video()`'s JSON2Video implementation with a local FFmpeg-based o
 
 ## Architecture
 
-### 1. `nixpacks.toml` (new, repo root) — install `ffmpeg` on Railway
+### 1. Railway service variable — install `ffmpeg` at runtime
 
-Railway currently builds this repo with default Nixpacks and no extra system packages. Add:
+This repo builds on Railway via **Railpack** (confirmed from a live build log — not Nixpacks, despite that being the more commonly-documented default elsewhere), with no extra system packages today. Railpack supports installing apt packages into the final deploy image via the `RAILPACK_DEPLOY_APT_PACKAGES` service variable (as opposed to `RAILPACK_BUILD_APT_PACKAGES`, which only affects the build stage and wouldn't be present at runtime). Set on the `Catapult-Bot` service only (the one that actually renders — no need to add it to `web`):
 
-```toml
-[phases.setup]
-nixPkgs = ["ffmpeg"]
+```
+RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg
 ```
 
-Applies to both Railway services built from this repo (`Catapult-Bot` worker and `web`), though only `Catapult-Bot` actually renders.
+No repo file needed for this — it's a Railway service variable, set via `railway variables --set` or the dashboard.
 
 ### 2. `assets/fonts/DejaVuSans-Bold.ttf` (new, committed binary)
 
