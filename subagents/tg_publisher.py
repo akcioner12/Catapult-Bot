@@ -20,6 +20,7 @@ from telegram.ext import ContextTypes
 
 from subagents.image_brief import generate_image_brief
 from subagents.rewriter import generate_catapult_post, generate_post_claude, CATAPULT_ANGLES
+from subagents.instagram_publisher import upload_photo_to_instagram
 
 logger = logging.getLogger(__name__)
 
@@ -712,6 +713,18 @@ async def auto_publish(slot: str):
                     try:
                         with open(post["photo_path"], "rb") as photo_file:
                             await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                        instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                        if instagram_url:
+                            logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
+                        else:
+                            await client.post(
+                                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                                json={
+                                    "chat_id": ADMIN_TG_ID,
+                                    "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                    "parse_mode": "HTML",
+                                },
+                            )
                         try:
                             os.remove(post["photo_path"])
                         except Exception:
@@ -738,6 +751,18 @@ async def auto_publish(slot: str):
                             photo=InputFile(photo_file),
                         )
                     logger.info(f"✅ Фото опубликовано")
+                    instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                    if instagram_url:
+                        logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
+                    else:
+                        await client.post(
+                            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+                            json={
+                                "chat_id": ADMIN_TG_ID,
+                                "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                "parse_mode": "HTML",
+                            },
+                        )
                     try:
                         os.remove(post["photo_path"])
                     except Exception:
