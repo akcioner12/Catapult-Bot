@@ -30,3 +30,8 @@ async def push_media(kind: str, local_path: str) -> bool:
     except Exception as e:
         logger.error(f"push_media({kind}, {filename}) error: {e}")
         return False
+
+
+def media_url(kind: str, local_path: str) -> str:
+    filename = os.path.basename(local_path)
+    return f"{BACKEND_URL}/media/{kind}/{filename}?token={MEDIA_SERVE_TOKEN}"
