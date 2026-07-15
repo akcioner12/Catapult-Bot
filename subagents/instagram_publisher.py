@@ -2,11 +2,13 @@
 Sub-agent: публикация фото-постов и Reels в Instagram через Buffer.
 """
 import os
+import time
 import logging
 
 from subagents.buffer_publisher import publish_to_buffer
 from subagents.media_push import push_media, media_url
 from subagents.instagram_caption import generate_instagram_caption
+from subagents.image_generator import generate_image
 
 logger = logging.getLogger(__name__)
 
@@ -19,25 +21,25 @@ def _full_caption(parts: dict) -> str:
     return parts["caption"]
 
 
-async def upload_photo_to_instagram(photo_path: str, source_text: str, category: str) -> str | None:
-    """Публикует photo_path в Instagram (лента) через Buffer. Возвращает ссылку
-    на пост или None. generate_image пушит фото на web ещё при генерации, но
-    не проверяет результат push_media — при сбое той попытки файл может так и
-    не оказаться на web, поэтому пушим ещё раз здесь (дёшево, push_media просто
-    перезаписывает тот же файл)."""
+async def upload_photo_to_instagram(brief: str, source_text: str, category: str) -> str | None:
+    """Генерирует отдельную вертикальную (9:16) картинку по тому же ТЗ (brief),
+    что и горизонтальная картинка поста для Telegram, и публикует именно её в
+    Instagram (лента) через Buffer. Горизонтальная картинка для Telegram не
+    переиспользуется — Instagram обрезает её вбок, а не просто ужимает, из-за
+    чего половина сюжета терялась. generate_image сам пушит файл на web, так
+    что отдельный push_media здесь не нужен. Возвращает ссылку на пост или None."""
     if not BUFFER_INSTAGRAM_CHANNEL_ID:
         logger.warning("BUFFER_INSTAGRAM_CHANNEL_ID не задан — пропускаем публикацию в Instagram")
         return None
-    if not os.path.exists(photo_path):
-        logger.error(f"upload_photo_to_instagram: файл не найден {photo_path}")
-        return None
-    if not await push_media("photos", photo_path):
-        logger.error("upload_photo_to_instagram: не удалось выложить фото на web")
+
+    ig_photo_path = await generate_image(brief, f"ig_{int(time.time())}", aspect_ratio="9:16")
+    if not ig_photo_path:
+        logger.error("upload_photo_to_instagram: не удалось сгенерировать вертикальную картинку")
         return None
 
     parts = await generate_instagram_caption(source_text, category, "photo")
     return await publish_to_buffer(
-        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("photos", photo_path), "image",
+        BUFFER_INSTAGRAM_CHANNEL_ID, _full_caption(parts), media_url("photos", ig_photo_path), "image",
         metadata={"instagram": {"type": "post", "shouldShareToFeed": True}},
     )
 

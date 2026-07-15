@@ -655,7 +655,7 @@ async def publish_now(post: dict):
                 try:
                     with open(post["photo_path"], "rb") as photo_file:
                         await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
-                    instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                    instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                     else:
@@ -725,7 +725,7 @@ async def auto_publish(slot: str):
                     try:
                         with open(post["photo_path"], "rb") as photo_file:
                             await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
-                        instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                        instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                         if instagram_url:
                             logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                         else:
@@ -763,7 +763,7 @@ async def auto_publish(slot: str):
                             photo=InputFile(photo_file),
                         )
                     logger.info(f"✅ Фото опубликовано")
-                    instagram_url = await upload_photo_to_instagram(post["photo_path"], post["text"], category)
+                    instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                     else:
