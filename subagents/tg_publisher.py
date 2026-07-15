@@ -655,6 +655,16 @@ async def publish_now(post: dict):
                 try:
                     with open(post["photo_path"], "rb") as photo_file:
                         await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                except Exception as photo_err:
+                    logger.warning(f"publish_now sendPhoto failed: {photo_err}")
+                # Текст — сразу вслед за фото, до Instagram (может занимать до пары
+                # минут) — так основной пост в Telegram гарантированно целый, даже
+                # если что-то прервёт публикацию в Instagram на середине.
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={"chat_id": CHANNEL_ID, "text": post["text"], "parse_mode": "HTML", "disable_web_page_preview": True}
+                )
+                try:
                     instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
@@ -667,16 +677,12 @@ async def publish_now(post: dict):
                                 "parse_mode": "HTML",
                             },
                         )
-                    try:
-                        os.remove(post["photo_path"])
-                    except Exception:
-                        pass
-                except Exception as photo_err:
-                    logger.warning(f"publish_now sendPhoto failed: {photo_err}")
-                await client.post(
-                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
-                    json={"chat_id": CHANNEL_ID, "text": post["text"], "parse_mode": "HTML", "disable_web_page_preview": True}
-                )
+                except Exception as ig_err:
+                    logger.warning(f"publish_now Instagram publish failed: {ig_err}")
+                try:
+                    os.remove(post["photo_path"])
+                except Exception:
+                    pass
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
@@ -725,6 +731,22 @@ async def auto_publish(slot: str):
                     try:
                         with open(post["photo_path"], "rb") as photo_file:
                             await main_bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(photo_file))
+                    except Exception as photo_err:
+                        logger.warning(f"poll sendPhoto failed: {photo_err}")
+                # Сам опрос — сразу вслед за фото, до Instagram (может занимать до
+                # пары минут) — так основной пост гарантированно целый, даже если
+                # что-то прервёт публикацию в Instagram на середине.
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPoll",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "question": poll_data["question"],
+                        "options": poll_data["options"],
+                        "is_anonymous": True,
+                    }
+                )
+                if post.get("photo_path") and os.path.exists(post["photo_path"]):
+                    try:
                         instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                         if instagram_url:
                             logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
@@ -737,21 +759,12 @@ async def auto_publish(slot: str):
                                     "parse_mode": "HTML",
                                 },
                             )
-                        try:
-                            os.remove(post["photo_path"])
-                        except Exception:
-                            pass
-                    except Exception as photo_err:
-                        logger.warning(f"poll sendPhoto failed: {photo_err}")
-                await client.post(
-                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendPoll",
-                    json={
-                        "chat_id": CHANNEL_ID,
-                        "question": poll_data["question"],
-                        "options": poll_data["options"],
-                        "is_anonymous": True,
-                    }
-                )
+                    except Exception as ig_err:
+                        logger.warning(f"poll Instagram publish failed: {ig_err}")
+                    try:
+                        os.remove(post["photo_path"])
+                    except Exception:
+                        pass
             elif post.get("photo_path") and os.path.exists(post["photo_path"]):
                 # Сначала фото без текста, потом полный текст с футером
                 from telegram import Bot, InputFile
@@ -763,6 +776,21 @@ async def auto_publish(slot: str):
                             photo=InputFile(photo_file),
                         )
                     logger.info(f"✅ Фото опубликовано")
+                except Exception as photo_err:
+                    logger.warning(f"sendPhoto failed: {photo_err}, публикую без картинки")
+                # Текст — сразу вслед за фото, до Instagram (может занимать до пары
+                # минут) — так основной пост в Telegram гарантированно целый, даже
+                # если что-то прервёт публикацию в Instagram на середине.
+                await client.post(
+                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": CHANNEL_ID,
+                        "text": post["text"],
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True
+                    }
+                )
+                try:
                     instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
@@ -775,22 +803,12 @@ async def auto_publish(slot: str):
                                 "parse_mode": "HTML",
                             },
                         )
-                    try:
-                        os.remove(post["photo_path"])
-                    except Exception:
-                        pass
-                except Exception as photo_err:
-                    logger.warning(f"sendPhoto failed: {photo_err}, публикую без картинки")
-                # Затем полный текст с футером отдельным сообщением
-                await client.post(
-                    f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
-                    json={
-                        "chat_id": CHANNEL_ID,
-                        "text": post["text"],
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": True
-                    }
-                )
+                except Exception as ig_err:
+                    logger.warning(f"Instagram publish failed: {ig_err}")
+                try:
+                    os.remove(post["photo_path"])
+                except Exception:
+                    pass
             else:
                 await client.post(
                     f"https://api.telegram.org/bot{MAIN_BOT_TOKEN}/sendMessage",
