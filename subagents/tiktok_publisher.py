@@ -26,4 +26,5 @@ async def upload_to_tiktok(video_path: str, caption: str) -> str | None:
         logger.error("upload_to_tiktok: не удалось выложить видео на web")
         return None
 
-    return await publish_to_buffer(BUFFER_TIKTOK_CHANNEL_ID, caption, media_url("videos", video_path), "video")
+    url, _ = await publish_to_buffer(BUFFER_TIKTOK_CHANNEL_ID, caption, media_url("videos", video_path), "video")
+    return url

@@ -518,11 +518,12 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
 
-    instagram_url = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
+    instagram_url, ig_error = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
     if instagram_url:
         status_lines.append(f"✅ Instagram: {instagram_url}")
     else:
-        status_lines.append("⚠️ Instagram не удался — /retry_instagram")
+        reason = f" ({ig_error})" if ig_error else ""
+        status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram")
         instagram_retry_pending[video_id] = video
         save_instagram_retry_pending()
 
@@ -588,7 +589,7 @@ async def retry_instagram_upload(video_id: str):
     video = instagram_retry_pending.get(video_id)
     if not video:
         return
-    instagram_url = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
+    instagram_url, _ = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
     if not instagram_url:
         return
     instagram_retry_pending.pop(video_id, None)

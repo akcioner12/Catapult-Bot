@@ -665,15 +665,15 @@ async def publish_now(post: dict):
                     json={"chat_id": CHANNEL_ID, "text": post["text"], "parse_mode": "HTML", "disable_web_page_preview": True}
                 )
                 try:
-                    instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
+                    instagram_url, ig_error = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
-                    else:
+                    elif ig_error:
                         await client.post(
                             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                             json={
                                 "chat_id": ADMIN_TG_ID,
-                                "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
                                 "parse_mode": "HTML",
                             },
                         )
@@ -747,15 +747,15 @@ async def auto_publish(slot: str):
                 )
                 if post.get("photo_path") and os.path.exists(post["photo_path"]):
                     try:
-                        instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
+                        instagram_url, ig_error = await upload_photo_to_instagram(post["brief"], post["text"], category)
                         if instagram_url:
                             logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
-                        else:
+                        elif ig_error:
                             await client.post(
                                 f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                                 json={
                                     "chat_id": ADMIN_TG_ID,
-                                    "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                    "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
                                     "parse_mode": "HTML",
                                 },
                             )
@@ -791,15 +791,15 @@ async def auto_publish(slot: str):
                     }
                 )
                 try:
-                    instagram_url = await upload_photo_to_instagram(post["brief"], post["text"], category)
+                    instagram_url, ig_error = await upload_photo_to_instagram(post["brief"], post["text"], category)
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
-                    else:
+                    elif ig_error:
                         await client.post(
                             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                             json={
                                 "chat_id": ADMIN_TG_ID,
-                                "text": "⚠️ Не удалось опубликовать фото-пост в Instagram.",
+                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
                                 "parse_mode": "HTML",
                             },
                         )

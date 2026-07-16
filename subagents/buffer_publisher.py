@@ -29,22 +29,24 @@ mutation($input: CreatePostInput!) {
 
 POST_STATUS_QUERY = """
 query($id: PostId!) {
-  post(input: {id: $id}) { id status sentAt externalLink }
+  post(input: {id: $id}) { id status sentAt externalLink error { message } }
 }
 """
 
 
 async def publish_to_buffer(
     channel_id: str, caption: str, media_url: str, media_type: str, metadata: dict | None = None
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """Публикует media_url (уже публичный HTTPS-адрес) в канал channel_id через
     Buffer. media_type: "video" или "image". metadata: платформо-специфичные
     поля Buffer (например {"instagram": {"type": "post", "shouldShareToFeed": True}}
     — Instagram, в отличие от TikTok, требует явно указать тип поста). Возвращает
-    ссылку на пост, или None при ошибке/таймауте (никогда не бросает исключение)."""
+    (ссылка_на_пост, None) при успехе или (None, причина) при ошибке/таймауте —
+    причина в человекочитаемом виде от самого Buffer (например "потеряна
+    авторизация канала"), не техническая ошибка. Никогда не бросает исключение."""
     if not BUFFER_API_KEY or not channel_id:
         logger.warning("BUFFER_API_KEY/channel_id не заданы — пропускаем публикацию через Buffer")
-        return None
+        return None, None
 
     headers = {"Authorization": f"Bearer {BUFFER_API_KEY}", "Content-Type": "application/json"}
 
@@ -72,11 +74,11 @@ async def publish_to_buffer(
             result = data.get("data", {}).get("createPost", {})
             if "message" in result:
                 logger.error(f"Buffer createPost error: {result['message']}")
-                return None
+                return None, result["message"]
             post_id = result.get("post", {}).get("id")
             if not post_id:
                 logger.error(f"Buffer createPost: неожиданный ответ: {data}")
-                return None
+                return None, "неожиданный ответ Buffer"
 
             for _ in range(24):  # до ~2 минут ожидания публикации
                 await asyncio.sleep(5)
@@ -88,13 +90,14 @@ async def publish_to_buffer(
                 post = status_resp.json().get("data", {}).get("post", {})
                 if post.get("status") == "sent":
                     logger.info(f"✅ Опубликовано через Buffer: {post['externalLink']}")
-                    return post["externalLink"]
+                    return post["externalLink"], None
                 if post.get("status") == "error":
-                    logger.error(f"Buffer: публикация завершилась ошибкой: {post}")
-                    return None
+                    reason = (post.get("error") or {}).get("message") or "неизвестная ошибка Buffer"
+                    logger.error(f"Buffer: публикация завершилась ошибкой: {reason}")
+                    return None, reason
 
             logger.error("Buffer: публикация не завершилась за отведённое время")
-            return None
+            return None, "публикация не завершилась за 2 минуты"
     except Exception as e:
         logger.error(f"publish_to_buffer error: {e}")
-        return None
+        return None, str(e)
