@@ -1212,8 +1212,9 @@ async def main():
     # Вечерняя генерация каждый день в 20:00
     scheduler.add_job(evening_generation, "cron", hour=20, minute=0)
 
-    # Проверка горячих новостей каждый час
-    scheduler.add_job(check_breaking_news, "interval", hours=1)
+    # Проверка горячих новостей каждый час, но только в дневное время (8:00-22:00) —
+    # аудитория русскоязычная, публикация ночью никому не видна и не нужна
+    scheduler.add_job(check_breaking_news, "cron", hour="8-22", minute=0)
 
     # Публикация по расписанию из очереди одобренных видео
     scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=8,  minute=30, args=["forex"])
