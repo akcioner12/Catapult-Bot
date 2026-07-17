@@ -19,7 +19,7 @@ from telegram.ext import ContextTypes
 from subagents.tiktok_publisher import upload_to_tiktok
 from subagents.instagram_publisher import upload_reel_to_instagram
 from subagents.tiktok_moderation import check_tiktok_compliance, FAIL_CLOSED_REASON
-from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script
+from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script, SOCIAL_FOOTER as _YT_SOCIAL_FOOTER
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
 
@@ -429,8 +429,20 @@ async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail
     except Exception as e:
         logger.error(f"announce_in_telegram error: {e}")
 
+TIKTOK_SOCIAL_FOOTER = (
+    "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
+    "YouTube:   https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg\n"
+    "Instagram:   https://www.instagram.com/crypto.ai.forex/\n"
+    "Twitter/X:   https://x.com/cryptoaiforex\n\n"
+    "#Shorts #crypto #cryptocurrency #ai #aivideo #forex #forextrading #forexsignals"
+)
+
 def _tiktok_caption(video: dict) -> str:
-    return f"{video['title']}\n\n{video['description']}"
+    # video["description"] заканчивается YouTube-футером (SOCIAL_FOOTER) — для
+    # TikTok он не подходит (ссылается сам на себя, без YouTube), поэтому
+    # отрезаем его и подставляем TikTok-специфичный список соцсетей.
+    body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
+    return f"{video['title']}\n\n{body}\n\n{TIKTOK_SOCIAL_FOOTER}"
 
 async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str) -> tuple[str, str] | None:
     """Одна попытка более лояльной версии под TikTok. (tiktok_url, note) при успехе,
