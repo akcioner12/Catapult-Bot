@@ -35,7 +35,7 @@ CHANNEL_SIGNATURE = """
 ———
 🔔 Подпишись и не пропусти важное
 
-▶️ <a href="https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg">YouTube</a> | 💬 <a href="https://t.me/Crypto_AI_Forex_Chat">TG Chat</a> | 🎵 <a href="https://www.tiktok.com/@crypto_ai_forex">TikTok</a> | 📷 <a href="https://www.instagram.com/crypto.ai.forex/">Instagram</a> | 🤖 <a href="https://t.me/catapulttrade_guide_bot">TG Bot</a> | 🐦 <a href="https://x.com/cryptoaiforex">Twitter</a>"""
+▶️ <a href="https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg">YouTube</a> | 💬 <a href="https://t.me/Crypto_AI_Forex_Chat">TG Chat</a> | 🎵 <a href="https://tiktok.com/@crypto.ai.forex">TikTok</a> | 📷 <a href="https://www.instagram.com/crypto.ai.forex/">Instagram</a> | 🤖 <a href="https://t.me/catapulttrade_guide_bot">TG Bot</a> | 🐦 <a href="https://x.com/cryptoaiforex">Twitter</a>"""
 
 # ── Состояние ─────────────────────────────────────────────────────────────────
 pending_posts: dict = {}

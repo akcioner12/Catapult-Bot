@@ -17,7 +17,7 @@ BUFFER_INSTAGRAM_CHANNEL_ID = os.getenv("BUFFER_INSTAGRAM_CHANNEL_ID", "")
 SOCIAL_FOOTER = (
     "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
     "YouTube:   https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg\n"
-    "Tik Tok:   https://www.tiktok.com/@crypto_ai_forex\n"
+    "Tik Tok:   https://tiktok.com/@crypto.ai.forex\n"
     "Twitter/X:   https://x.com/cryptoaiforex"
 )
 
