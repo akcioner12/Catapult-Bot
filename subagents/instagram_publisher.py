@@ -14,11 +14,19 @@ logger = logging.getLogger(__name__)
 
 BUFFER_INSTAGRAM_CHANNEL_ID = os.getenv("BUFFER_INSTAGRAM_CHANNEL_ID", "")
 
+SOCIAL_FOOTER = (
+    "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
+    "YouTube:   https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg\n"
+    "Tik Tok:   https://www.tiktok.com/@crypto_ai_forex\n"
+    "Twitter/X:   https://x.com/cryptoaiforex"
+)
+
 
 def _full_caption(parts: dict) -> str:
+    caption = f"{parts['caption']}\n\n{SOCIAL_FOOTER}"
     if parts["hashtags"]:
-        return f"{parts['caption']}\n\n{' '.join(parts['hashtags'])}"
-    return parts["caption"]
+        return f"{caption}\n\n{' '.join(parts['hashtags'])}"
+    return caption
 
 
 async def upload_photo_to_instagram(brief: str, source_text: str, category: str) -> tuple[str | None, str | None]:
