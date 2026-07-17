@@ -438,12 +438,25 @@ async def generate_weekly_batch():
         await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
         await asyncio.sleep(2)
 
-async def generate_one_test_video():
-    """Генерирует один ролик (первая категория недельного расписания) — для
-    быстрой проверки пайплайна без запуска полной недельной генерации."""
-    entry = WEEKLY_SCHEDULE[0]
+async def generate_one_test_video(category: str | None = None) -> bool:
+    """Генерирует один ролик — для быстрой проверки пайплайна или ручной
+    замены уже сгенерированного видео, без запуска полной недельной генерации.
+    Без category — первая категория недельного расписания (как раньше).
+    С category — слот этой категории на завтра, если есть в расписании,
+    иначе первый попавшийся слот этой категории. False, если категории вообще
+    нет в расписании."""
+    if category:
+        tomorrow = datetime.now(KYIV_TZ) + timedelta(days=1)
+        day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][tomorrow.weekday()]
+        entry = next((e for e in WEEKLY_SCHEDULE if e["category"] == category and e["day"] == day_key), None) \
+            or next((e for e in WEEKLY_SCHEDULE if e["category"] == category), None)
+        if not entry:
+            return False
+    else:
+        entry = WEEKLY_SCHEDULE[0]
     planned_time = f'{entry["hour"]:02d}:{entry["minute"]:02d}'
     await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
+    return True
 
 # ── Ежедневная генерация видео на завтра (часть evening_generation) ──────────
 async def generate_tomorrows_videos():

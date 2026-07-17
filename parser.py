@@ -117,8 +117,15 @@ async def cmd_generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_generate_video_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
-    await update.message.reply_text("🎬 Генерирую один тестовый ролик...")
-    await generate_one_test_video()
+    category = context.args[0] if context.args else None
+    if category:
+        await update.message.reply_text(f"🎬 Генерирую один тестовый ролик категории {category}...")
+        ok = await generate_one_test_video(category)
+        if not ok:
+            await update.message.reply_text(f"⚠️ Категории «{category}» нет в расписании.")
+    else:
+        await update.message.reply_text("🎬 Генерирую один тестовый ролик...")
+        await generate_one_test_video()
 
 async def cmd_generate_tomorrows_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
