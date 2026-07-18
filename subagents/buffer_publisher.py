@@ -80,7 +80,7 @@ async def publish_to_buffer(
                 logger.error(f"Buffer createPost: неожиданный ответ: {data}")
                 return None, "неожиданный ответ Buffer"
 
-            for _ in range(24):  # до ~2 минут ожидания публикации
+            for _ in range(72):  # до ~6 минут ожидания публикации — на новом TikTok-канале подтверждение реально приходит за 2.5-3 минуты, 2 минуты давали ложные "не удалось" при фактически успешной публикации
                 await asyncio.sleep(5)
                 status_resp = await client.post(
                     BUFFER_URL,
