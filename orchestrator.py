@@ -166,31 +166,34 @@ async def is_catapult_urgent(post_text: str) -> bool:
                 },
                 json={
                     "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 12,
+                    "max_tokens": 100,
                     "messages": [{
                         "role": "user",
                         "content": (
                             "Ты редактор Telegram-канала, продвигающего платформу Catapult Trade через реферальную программу.\n"
                             "Тебе показывают пост из официального канала Catapult Trade.\n"
                             "Вопрос: если опубликовать этот пост только завтра вечером — читатель упустит реальную возможность или дедлайн?\n\n"
-                            "ПУБЛИКОВАТЬ СЕЙЧАС — если пост объявляет:\n"
+                            "ПУБЛИКОВАТЬ СЕЙЧАС — только если пост объявляет:\n"
                             "— Ограниченное по времени окно доступа (whitelist, early access, pre-sale)\n"
                             "— Конкретный дедлайн или обратный отсчёт (часы/дни до события)\n"
                             "— Старт или окончание продажи токена, листинга, акции\n"
-                            "— Любое \"успей/только сейчас/осталось N часов\"\n\n"
-                            "ЖДАТЬ ДО ВЕЧЕРА — если это:\n"
-                            "— Общие новости о партнёрствах, обновлениях продукта без дедлайна\n"
+                            "— Явное \"успей/только сейчас/осталось N часов\"\n\n"
+                            "ЖДАТЬ ДО ВЕЧЕРА — почти всегда, включая:\n"
+                            "— Общие новости о партнёрствах, обновлениях продукта или условий программы — без даты окончания\n"
                             "— Аналитика, статистика, отчёты\n"
-                            "— Обычные образовательные/маркетинговые посты без временного окна\n\n"
+                            "— Обычные образовательные/маркетинговые посты — даже если написаны с энтузиазмом (\"горячая тема\", \"все обсуждают прямо сейчас\"). Восторженный ТОН поста — не срочность, важен только реальный дедлайн.\n\n"
                             f"Пост:\n{post_text[:700]}\n\n"
-                            "Один ответ: СЕЙЧАС или ЖДАТЬ"
+                            "Сначала одной короткой фразой укажи, есть ли в посте конкретный дедлайн (и какой, если есть). "
+                            "Затем на последней строке — ровно одно слово, ничего больше: СЕЙЧАС или ЖДАТЬ."
                         )
                     }]
                 }
             )
-            answer = resp.json()["content"][0]["text"].strip().upper()
-            result = "СЕЙЧАС" in answer
-            logger.info(f"is_catapult_urgent → {answer} → {'ДА' if result else 'НЕТ'}")
+            answer = resp.json()["content"][0]["text"].strip()
+            verdict_lines = [line.strip().upper() for line in answer.splitlines() if line.strip()]
+            verdict = verdict_lines[-1] if verdict_lines else ""
+            result = "СЕЙЧАС" in verdict and "ЖДАТЬ" not in verdict
+            logger.info(f"is_catapult_urgent → {answer!r} → {'ДА' if result else 'НЕТ'}")
             return result
     except Exception as e:
         logger.warning(f"is_catapult_urgent error: {e}")
@@ -240,6 +243,8 @@ async def check_breaking_news():
             slot = f"breaking_{category}_{int(datetime.utcnow().timestamp())}"
             brief = await generate_image_brief(text, category)
             photo_path = await generate_image(brief, slot)
+            if not photo_path:
+                await notify_admin(f"⚠️ Горячий пост [{category.upper()}] публикуется БЕЗ картинки — не удалось сгенерировать изображение. Проверь баланс/квоту Gemini API (ai.studio/projects).")
             await publish_now_auto(text, category, slot, brief, photo_path, top["channel"])
             mark_breaking_posted(category)
         except Exception as e:
