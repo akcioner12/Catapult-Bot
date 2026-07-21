@@ -17,6 +17,7 @@ from subagents.tg_publisher import pending_posts, approved_queue, send_for_appro
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
 from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
+from subagents.engagement_ideas import generate_engagement_comments
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
@@ -383,20 +384,38 @@ async def evening_generation():
 
     await generate_tomorrows_videos()
 
-# ── Еженедельная генерация 14 видео (только ручной запуск через /generate_video) ──
-async def _generate_and_queue_video(category: str, planned_day: str, planned_time: str):
+# ── Сбор горячих тем по категории (общее для видео и engagement-дайджеста) ────
+async def _collect_topic_source(category: str) -> str:
     posts = await collect_top_posts(category)
 
     if category == "catapult":
-        topic_source = posts[0]["text"] if posts else category
-    else:
-        candidates = [f"[TG] {p['text'][:200]}" for p in posts[:5]]
-        ideas = await get_trending_shorts_ideas(category)
-        candidates += [f"[YouTube] {t}" for t in ideas]
-        if category == "crypto":
-            coins = await get_trending_coins()
-            candidates += [f"[Trending coin] {c}" for c in coins]
-        topic_source = "\n".join(candidates) if candidates else category
+        return posts[0]["text"] if posts else category
+
+    candidates = [f"[TG] {p['text'][:200]}" for p in posts[:5]]
+    ideas = await get_trending_shorts_ideas(category)
+    candidates += [f"[YouTube] {t}" for t in ideas]
+    if category == "crypto":
+        coins = await get_trending_coins()
+        candidates += [f"[Trending coin] {c}" for c in coins]
+    return "\n".join(candidates) if candidates else category
+
+# ── Дайджест тем + готовых комментариев для ручного engagement в TikTok/Instagram ──
+async def get_engagement_digest() -> str:
+    lines = ["💬 <b>Темы дня для комментариев в TikTok/Instagram</b>\n"]
+    for category in ["crypto", "ai", "forex", "catapult"]:
+        topic_source = await _collect_topic_source(category)
+        comments = await generate_engagement_comments(topic_source, category)
+        if not comments:
+            continue
+        lines.append(f"\n<b>{category.upper()}</b>")
+        for i, comment in enumerate(comments, 1):
+            lines.append(f"{i}. {comment}")
+    lines.append("\nНайди подходящее видео на эти темы в TikTok/Instagram и оставь один из вариантов вручную.")
+    return "\n".join(lines)
+
+# ── Еженедельная генерация 14 видео (только ручной запуск через /generate_video) ──
+async def _generate_and_queue_video(category: str, planned_day: str, planned_time: str):
+    topic_source = await _collect_topic_source(category)
 
     script_data = await generate_video_script(topic_source, category)
     if not script_data:
