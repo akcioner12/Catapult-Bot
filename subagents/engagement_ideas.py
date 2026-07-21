@@ -55,7 +55,10 @@ async def generate_engagement_comments(topic_source: str, category: str) -> list
                 logger.error(f"generate_engagement_comments error: {data}")
                 return []
             raw = data["content"][0]["text"]
-            return re.findall(r"^\d:\s*(.+)$", raw, re.MULTILINE)
+            comments = re.findall(r"^\s*\d+[.:)]\s*(.+)$", raw, re.MULTILINE)
+            if not comments:
+                logger.warning(f"generate_engagement_comments[{category}]: не удалось распарсить ответ: {raw[:300]!r}")
+            return comments
     except Exception as e:
         logger.error(f"generate_engagement_comments error: {e}")
         return []
