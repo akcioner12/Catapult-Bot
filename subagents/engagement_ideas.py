@@ -15,25 +15,37 @@ from subagents.rewriter import CLAUDE_API_KEY, CLAUDE_API_URL
 logger = logging.getLogger(__name__)
 
 
-async def generate_engagement_comments(topic_source: str, category: str) -> list[str]:
-    """2 коротких варианта комментария под тему. [] при сбое — не блокирует дайджест."""
+async def generate_engagement_idea(topic_source: str, category: str) -> dict | None:
+    """{"query": str, "comments": [str, str]} под широкую тему (не узкий факт из
+    исходного поста — под конкретную цифру/событие видео в TikTok/Instagram может
+    и не найтись). None при сбое — не блокирует дайджест."""
     prompt = f"""Ты ведёшь Instagram/TikTok-аккаунт на тему крипты/форекса/ИИ/трейдинга.
 
-Ниже — горячая тема дня в нише {category}:
+Ниже — горячая тема дня в нише {category} (из Telegram-канала, конкретные цифры и детали
+могут не встретиться в TikTok/Instagram — это просто наводка на общую тему):
 {topic_source[:700]}
 
-Напиши 2 коротких варианта комментария, которые можно оставить под ЧУЖИМ видео на эту тему
-(в TikTok или Instagram), чтобы его автор и зрители заметили тебя и захотели зайти на твой профиль.
+Сделай две вещи:
 
-Требования к каждому варианту:
-— По существу темы, а не общая фраза ("класс!", "огонь!") — покажи, что ты реально понимаешь тему.
-— Добавляет что-то своё: мнение, факт, лёгкий инсайт или уточняющий вопрос.
-— БЕЗ ссылок, БЕЗ "подписывайся", БЕЗ прямой рекламы — это выглядит как спам и отталкивает.
+1. QUERY: короткий поисковый запрос (2-4 слова) для поиска в TikTok/Instagram — широкая
+тема, не узкий факт, чтобы по нему реально нашлись существующие видео (например не
+"зона 49.70-54.50 по серебру", а "серебро форекс" или "цена серебра").
+
+2. Два коротких варианта комментария на эту широкую тему — которые можно оставить под
+РАЗНЫМИ подходящими видео по этому запросу (не только под одно конкретное видео с
+той самой цифрой из источника), чтобы автор и зрители заметили тебя и зашли на профиль.
+
+Требования к комментариям:
+— По существу темы, а не общая фраза ("класс!", "огонь!") — покажи, что разбираешься.
+— Добавляет что-то своё: мнение, наблюдение или уточняющий вопрос — без привязки к цифрам,
+которых может не быть в найденном видео.
+— БЕЗ ссылок, БЕЗ "подписывайся", БЕЗ прямой рекламы — выглядит как спам и отталкивает.
 — 1-2 предложения, разговорный тон, без хэштегов.
 
 Ответь СТРОГО в этом формате, без пояснений:
-1: <текст>
-2: <текст>"""
+QUERY: <запрос>
+1: <комментарий>
+2: <комментарий>"""
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -46,19 +58,21 @@ async def generate_engagement_comments(topic_source: str, category: str) -> list
                 },
                 json={
                     "model": "claude-sonnet-4-6",
-                    "max_tokens": 300,
+                    "max_tokens": 350,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
             data = resp.json()
             if "content" not in data:
-                logger.error(f"generate_engagement_comments error: {data}")
-                return []
+                logger.error(f"generate_engagement_idea error: {data}")
+                return None
             raw = data["content"][0]["text"]
+            query_match = re.search(r"QUERY:\s*(.+)", raw)
             comments = re.findall(r"^\s*\d+[.:)]\s*(.+)$", raw, re.MULTILINE)
-            if not comments:
-                logger.warning(f"generate_engagement_comments[{category}]: не удалось распарсить ответ: {raw[:300]!r}")
-            return comments
+            if not query_match or not comments:
+                logger.warning(f"generate_engagement_idea[{category}]: не удалось распарсить ответ: {raw[:300]!r}")
+                return None
+            return {"query": query_match.group(1).strip(), "comments": comments}
     except Exception as e:
-        logger.error(f"generate_engagement_comments error: {e}")
-        return []
+        logger.error(f"generate_engagement_idea error: {e}")
+        return None

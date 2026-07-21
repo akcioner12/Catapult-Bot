@@ -17,7 +17,7 @@ from subagents.tg_publisher import pending_posts, approved_queue, send_for_appro
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
 from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
-from subagents.engagement_ideas import generate_engagement_comments
+from subagents.engagement_ideas import generate_engagement_idea
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
@@ -401,16 +401,16 @@ async def _collect_topic_source(category: str) -> str:
 
 # ── Дайджест тем + готовых комментариев для ручного engagement в TikTok/Instagram ──
 async def get_engagement_digest() -> str:
-    lines = ["💬 <b>Темы дня для комментариев в TikTok/Instagram</b>\n"]
+    lines = ["💬 <b>Идеи для комментариев в TikTok/Instagram</b>\n"]
     for category in ["crypto", "ai", "forex", "catapult"]:
         topic_source = await _collect_topic_source(category)
-        comments = await generate_engagement_comments(topic_source, category)
-        if not comments:
+        idea = await generate_engagement_idea(topic_source, category)
+        if not idea:
             continue
-        lines.append(f"\n<b>{category.upper()}</b>")
-        for i, comment in enumerate(comments, 1):
+        lines.append(f"\n<b>{category.upper()}</b> — ищи в поиске: «{idea['query']}»")
+        for i, comment in enumerate(idea["comments"], 1):
             lines.append(f"{i}. {comment}")
-    lines.append("\nНайди подходящее видео на эти темы в TikTok/Instagram и оставь один из вариантов вручную.")
+    lines.append("\nВбей запрос в поиск TikTok/Instagram, выбери подходящее видео и оставь один из вариантов вручную.")
     return "\n".join(lines)
 
 # ── Еженедельная генерация 14 видео (только ручной запуск через /generate_video) ──
