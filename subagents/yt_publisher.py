@@ -530,13 +530,17 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
 
-    instagram_url, ig_error = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
-    if instagram_url:
-        status_lines.append(f"✅ Instagram: {instagram_url}")
+    if video["category"] == "catapult":
+        status_lines.append("ℹ️ Instagram пропущен для Catapult (риск ограничения аккаунта за финансовую тематику)")
+        instagram_url = None
     else:
-        reason = f" ({ig_error})" if ig_error else ""
-        status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram {video_id}")
-        instagram_retry_pending[video_id] = video
+        instagram_url, ig_error = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
+        if instagram_url:
+            status_lines.append(f"✅ Instagram: {instagram_url}")
+        else:
+            reason = f" ({ig_error})" if ig_error else ""
+            status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram {video_id}")
+            instagram_retry_pending[video_id] = video
         save_instagram_retry_pending()
 
     if video_id not in tiktok_retry_pending and video_id not in instagram_retry_pending:
@@ -600,6 +604,11 @@ async def retry_tiktok_upload(video_id: str):
 async def retry_instagram_upload(video_id: str):
     video = instagram_retry_pending.get(video_id)
     if not video:
+        return
+    if video["category"] == "catapult":
+        instagram_retry_pending.pop(video_id, None)
+        save_instagram_retry_pending()
+        await notify_admin(f"ℹ️ {video_id}: Instagram пропущен для Catapult (риск ограничения аккаунта), убрано из очереди ретраев.")
         return
     instagram_url, _ = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
     if not instagram_url:

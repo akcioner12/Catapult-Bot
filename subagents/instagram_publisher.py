@@ -40,6 +40,9 @@ async def upload_photo_to_instagram(brief: str, source_text: str, category: str)
     if not BUFFER_INSTAGRAM_CHANNEL_ID:
         logger.warning("BUFFER_INSTAGRAM_CHANNEL_ID не задан — пропускаем публикацию в Instagram")
         return None, None
+    if category == "catapult":
+        logger.info("upload_photo_to_instagram: Catapult пропущен (риск ограничения аккаунта за финансовую тематику)")
+        return None, None
 
     ig_photo_path = await generate_image(brief, f"ig_{int(time.time())}", aspect_ratio="9:16")
     if not ig_photo_path:
@@ -56,6 +59,9 @@ async def upload_photo_to_instagram(brief: str, source_text: str, category: str)
 async def upload_reel_to_instagram(video_path: str, source_text: str, category: str) -> tuple[str | None, str | None]:
     """Публикует video_path в Instagram Reels через Buffer. Возвращает
     (ссылка, None) при успехе или (None, причина) при сбое."""
+    if category == "catapult":
+        logger.info("upload_reel_to_instagram: Catapult пропущен (риск ограничения аккаунта за финансовую тематику)")
+        return None, None
     if not BUFFER_INSTAGRAM_CHANNEL_ID:
         logger.warning("BUFFER_INSTAGRAM_CHANNEL_ID не задан — пропускаем публикацию в Instagram")
         return None, None
