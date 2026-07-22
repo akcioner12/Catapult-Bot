@@ -146,22 +146,40 @@ async def cmd_retry_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_retry_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
+    if context.args:
+        video_id = context.args[0]
+        if video_id not in tiktok_retry_pending:
+            await update.message.reply_text(f"⚠️ «{video_id}» не найдено в очереди TikTok.")
+            return
+        await update.message.reply_text("🔄 Повторная публикация в TikTok...")
+        await yt_publisher.retry_tiktok_upload(video_id)
+        return
     if not tiktok_retry_pending:
         await update.message.reply_text("📭 Нет видео для повторной публикации в TikTok.")
         return
-    await update.message.reply_text(f"🔄 Повторная публикация {len(tiktok_retry_pending)} видео в TikTok...")
+    await update.message.reply_text(f"🔄 Повторная публикация {len(tiktok_retry_pending)} видео в TikTok (с паузами, чтобы не словить лимит Buffer)...")
     for video_id in list(tiktok_retry_pending.keys()):
         await yt_publisher.retry_tiktok_upload(video_id)
+        await asyncio.sleep(30)
 
 async def cmd_retry_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
         return
+    if context.args:
+        video_id = context.args[0]
+        if video_id not in instagram_retry_pending:
+            await update.message.reply_text(f"⚠️ «{video_id}» не найдено в очереди Instagram.")
+            return
+        await update.message.reply_text("🔄 Повторная публикация в Instagram...")
+        await yt_publisher.retry_instagram_upload(video_id)
+        return
     if not instagram_retry_pending:
         await update.message.reply_text("📭 Нет видео для повторной публикации в Instagram.")
         return
-    await update.message.reply_text(f"🔄 Повторная публикация {len(instagram_retry_pending)} видео в Instagram...")
+    await update.message.reply_text(f"🔄 Повторная публикация {len(instagram_retry_pending)} видео в Instagram (с паузами, чтобы не словить лимит Buffer)...")
     for video_id in list(instagram_retry_pending.keys()):
         await yt_publisher.retry_instagram_upload(video_id)
+        await asyncio.sleep(30)
 
 async def cmd_engagement_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:

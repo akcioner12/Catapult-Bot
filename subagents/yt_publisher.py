@@ -526,7 +526,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
         if tiktok_url:
             status_lines.append(f"✅ TikTok: {tiktok_url}")
         else:
-            status_lines.append("⚠️ TikTok не удался — /retry_tiktok")
+            status_lines.append(f"⚠️ TikTok не удался — /retry_tiktok {video_id}")
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
 
@@ -535,7 +535,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
         status_lines.append(f"✅ Instagram: {instagram_url}")
     else:
         reason = f" ({ig_error})" if ig_error else ""
-        status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram")
+        status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram {video_id}")
         instagram_retry_pending[video_id] = video
         save_instagram_retry_pending()
 
