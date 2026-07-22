@@ -16,7 +16,7 @@ from datetime import timedelta
 
 import httpx
 from bs4 import BeautifulSoup
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, BotCommand
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -1294,6 +1294,21 @@ async def main():
     load_daily_state()
 
     await parser_app.initialize()
+    await parser_app.bot.set_my_commands([
+        BotCommand("generate", "Запустить вечернюю генерацию постов на завтра"),
+        BotCommand("queue", "Показать очередь постов на публикацию"),
+        BotCommand("cancel", "Отменить текущее редактирование/загрузку"),
+        BotCommand("engagement_ideas", "Темы + готовые комментарии для TikTok/Instagram"),
+        BotCommand("test_publish", "Тестово опубликовать пост из очереди"),
+        BotCommand("test_publish_video", "Опубликовать одно одобренное видео сейчас"),
+        BotCommand("test_generate", "Сгенерировать один тестовый пост (crypto)"),
+        BotCommand("generate_video", "Сгенерировать все 14 видео на неделю"),
+        BotCommand("generate_video_test", "Сгенерировать одно видео [категория]"),
+        BotCommand("generate_tomorrows_videos", "Сгенерировать видео на завтра вручную"),
+        BotCommand("retry_videos", "Повторить загрузку неудачных видео на YouTube"),
+        BotCommand("retry_tiktok", "Повторить публикацию в TikTok [id]"),
+        BotCommand("retry_instagram", "Повторить публикацию в Instagram [id]"),
+    ])
     await parser_app.start()
     await parser_app.updater.start_polling()
 
