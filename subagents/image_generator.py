@@ -1,6 +1,7 @@
 """
 Sub-agent: генерация картинок через Gemini 3.1 Flash Image (Nano Banana 2).
 """
+import asyncio
 import base64
 import logging
 import os
@@ -15,6 +16,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
 PHOTOS_DIR = "/data/photos"
 
+# 503 "high demand" — временная перегрузка на стороне Google, а не наша
+# ошибка. Остальные коды (429 нехватка кредитов, 400 и т.д.) ретраить
+# бессмысленно — там не самоустранится.
+RETRYABLE_STATUS = 503
+RETRY_DELAYS_SECONDS = [5, 15, 30]
+
 
 async def generate_image(brief: str, filename: str, aspect_ratio: str = "16:9") -> str | None:
     """Генерирует картинку по ТЗ через Gemini (Nano Banana 2). Возвращает путь к файлу или None."""
@@ -24,14 +31,21 @@ async def generate_image(brief: str, filename: str, aspect_ratio: str = "16:9") 
     try:
         os.makedirs(PHOTOS_DIR, exist_ok=True)
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                GEMINI_URL,
-                params={"key": GEMINI_API_KEY},
-                json={
-                    "contents": [{"parts": [{"text": brief[:800]}]}],
-                    "generationConfig": {"imageConfig": {"aspectRatio": aspect_ratio}},
-                },
-            )
+            resp = None
+            for attempt, delay in enumerate([0] + RETRY_DELAYS_SECONDS):
+                if delay:
+                    logger.warning(f"Gemini image API 503 (высокая нагрузка) — повтор через {delay}с")
+                    await asyncio.sleep(delay)
+                resp = await client.post(
+                    GEMINI_URL,
+                    params={"key": GEMINI_API_KEY},
+                    json={
+                        "contents": [{"parts": [{"text": brief[:800]}]}],
+                        "generationConfig": {"imageConfig": {"aspectRatio": aspect_ratio}},
+                    },
+                )
+                if resp.status_code != RETRYABLE_STATUS:
+                    break
             if resp.status_code != 200:
                 logger.error(f"Gemini image API error {resp.status_code}: {resp.text[:300]}")
                 return None
