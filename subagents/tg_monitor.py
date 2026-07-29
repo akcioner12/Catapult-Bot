@@ -126,13 +126,19 @@ async def get_posts_web(channel: str, hours: int = 24) -> list:
                 if post_date and post_date < cutoff:
                     continue
                 views = parse_post_views(msg)
+                links = []
+                for a in msg.find_all("a", href=True):
+                    href = a["href"]
+                    if href.startswith("http") and "t.me" not in href and href not in links:
+                        links.append(href)
                 posts.append({
                     "text": text,
                     "channel": channel,
                     "views": views,
                     "hash": h,
                     "source": "web",
-                    "date": post_date
+                    "date": post_date,
+                    "links": links[:3],
                 })
     except Exception as e:
         logger.warning(f"Web error @{channel}: {e}")

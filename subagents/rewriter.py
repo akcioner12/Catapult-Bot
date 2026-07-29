@@ -61,9 +61,12 @@ async def generate_post_claude(posts: list, category: str) -> str:
             age_hours = round((datetime.utcnow() - p["date"]).total_seconds() / 3600, 1)
             age = f"⏱{age_hours}ч назад"
         score = round(viral_score(p), 1)
+        links = p.get("links") or []
+        links_line = f"Ссылки в оригинале: {', '.join(links)}\n" if links else ""
         news_digest += (
             f"\n--- Новость {i} (@{p['channel']} | 👁{p['views']} просмотров | {age} | скор вирусности={score}) ---\n"
             f"{p['text'][:600]}\n"
+            f"{links_line}"
         )
 
     prompt = f"""{STYLE_GUIDE}
@@ -77,6 +80,11 @@ async def generate_post_claude(posts: list, category: str) -> str:
 Свежий пост с высоким скором важнее старого с большими просмотрами.
 Напиши на её основе один пост для канала с HTML форматированием (теги: <b>, <i>, <blockquote>).
 НЕ копируй дословно — осмысли и перескажи своими словами.
+
+Если у выбранной новости в дайджесте указаны "Ссылки в оригинале" — органично вставь одну
+из них гиперссылкой на релевантном слове/фразе в тексте поста, тегом <a href="URL">текст</a>
+(например на названии продукта/сервиса, о котором речь). Если ссылок для этой новости нет —
+не выдумывай и не подставляй ссылку от себя, просто обойдись без неё в этом месте.
 
 {news_digest}
 
