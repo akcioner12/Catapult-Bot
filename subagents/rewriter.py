@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 CLAUDE_API_KEY   = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_API_URL   = "https://api.anthropic.com/v1/messages"
 
+# CTA для всех категорий, кроме catapult (у него свой бот — @catapulttrade_guide_bot)
+COMMUNITY_CHAT_LINK = "https://t.me/+dHTRhCHKKWw5Njdi"
+
 # ── Углы для Catapult ─────────────────────────────────────────────────────────
 CATAPULT_ANGLES = [
     "реферальная программа и заработок на команде",
@@ -50,7 +53,8 @@ async def generate_post_claude(posts: list, category: str) -> str:
         "crypto": "криптовалюты, Bitcoin, блокчейн, DeFi, альткоины",
         "ai":     "искусственный интеллект, нейросети, AI инструменты для заработка",
         "forex":  "Forex, валютные пары, трейдинг, аналитика рынка",
-        "catapult": "торговую платформу Catapult Trade — новости, обновления, партнёрства, акции платформы"
+        "catapult": "торговую платформу Catapult Trade — новости, обновления, партнёрства, акции платформы",
+        "forexbot": "наш автоматический торговый бот для форекса — как он исполняет сигналы, управляет рисками (тейки, стопы, безубыток), результаты по депозиту",
     }
 
     # Формируем дайджест из всех постов с метриками
@@ -88,7 +92,7 @@ async def generate_post_claude(posts: list, category: str) -> str:
 
 {news_digest}
 
-{"В конце добавь: 👉 Подробнее в боте: @catapulttrade_guide_bot" if category == "catapult" else "В конце добавь: 💰 Лучший заработок сегодня здесь: @catapulttrade_guide_bot"}
+{"В конце добавь: 👉 Подробнее в боте: @catapulttrade_guide_bot" if category == "catapult" else f"В конце добавь: 💬 Обсуждаем это здесь: {COMMUNITY_CHAT_LINK}"}
 
 Только готовый пост, без пояснений."""
 
@@ -158,6 +162,58 @@ async def generate_catapult_post(angle: str) -> str:
     except Exception as e:
         logger.error(f"Claude Catapult error: {e}")
         return "Пост о Catapult"
+
+# ── Углы для forexbot ─────────────────────────────────────────────────────────
+FOREXBOT_ANGLES = [
+    "как бот исполняет сигнал — от появления сообщения в канале до открытой сделки",
+    "управление риском — тейки, стопы, перенос в безубыток",
+    "что бот делает, когда рынок резко дёргается",
+    "почему бот не торгует перед важными новостями",
+    "личный опыт — что изменилось с тех пор, как перестал торговать руками",
+]
+
+# ── Claude API — пост о forexbot (fallback, если в источниках пусто) ─────────
+async def generate_forexbot_post(angle: str) -> str:
+    prompt = f"""{STYLE_GUIDE}
+
+Напиши пост о нашем автоматическом торговом боте для форекса.
+
+Угол: {angle}
+
+Факты о боте:
+- Ловит торговые сигналы из канала автоматически, без участия человека
+- Сам открывает и закрывает сделки, расставляет тейк-профиты и стоп-лосс
+- Переносит стоп в безубыток, когда сделка выходит в плюс
+- Не торгует перед важными новостями — так минимизируется риск резких движений
+- Управление рисками зашито в логику бота, а не оставлено на усмотрение трейдера
+
+Напиши живой пост от первого лица с HTML форматированием.
+В конце: 💬 Обсуждаем это здесь: {COMMUNITY_CHAT_LINK}
+
+Только готовый пост, без пояснений."""
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 1000,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+            return "Пост о торговом боте"
+    except Exception as e:
+        logger.error(f"Claude forexbot error: {e}")
+        return "Пост о торговом боте"
 
 # ── Claude API — генерация опроса ──────────────────────────────────────────────
 async def generate_poll(recent_questions: list) -> dict | None:

@@ -42,7 +42,7 @@ WEEKLY_SCHEDULE = [
     {"day": "mon", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "mon", "hour": 19, "minute": 0,  "category": "crypto"},
     {"day": "tue", "hour": 18, "minute": 30, "category": "ai"},
-    {"day": "tue", "hour": 20, "minute": 0,  "category": "catapult"},
+    {"day": "tue", "hour": 20, "minute": 0,  "category": "forexbot"},
     {"day": "wed", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "wed", "hour": 19, "minute": 0,  "category": "crypto"},
     {"day": "thu", "hour": 18, "minute": 30, "category": "ai"},
@@ -50,7 +50,7 @@ WEEKLY_SCHEDULE = [
     {"day": "fri", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "fri", "hour": 19, "minute": 0,  "category": "crypto"},
     {"day": "sat", "hour": 12, "minute": 30, "category": "ai"},
-    {"day": "sat", "hour": 14, "minute": 0,  "category": "catapult"},
+    {"day": "sat", "hour": 14, "minute": 0,  "category": "forexbot"},
     {"day": "sun", "hour": 12, "minute": 30, "category": "crypto"},
     {"day": "sun", "hour": 14, "minute": 0,  "category": "ai"},
 ]
@@ -444,10 +444,12 @@ def _tiktok_caption(video: dict) -> str:
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     return f"{video['title']}\n\n{body}\n\n{TIKTOK_SOCIAL_FOOTER}"
 
-async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str) -> tuple[str, str] | None:
-    """Одна попытка более лояльной версии под TikTok. (tiktok_url, note) при успехе,
-    None если не получилось (сбой генерации/рендера, или повторный блок) — без
-    повторных попыток."""
+async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str) -> tuple[str, str, str, str] | None:
+    """Одна попытка более лояльной версии под TikTok. (tiktok_url, note, safe_video_path,
+    safe_caption) при успехе — safe_video_path/safe_caption пригодны для повторного
+    использования на других площадках (см. forexbot в _finish_publish), удаляет их
+    вызывающий код. None если не получилось (сбой генерации/рендера, или повторный
+    блок) — без повторных попыток."""
     fallback = await generate_tiktok_safe_script(video.get("narration", ""), video["category"], block_reason)
     if not fallback:
         return None
@@ -457,11 +459,11 @@ async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str
         if not audio_path:
             return None
         video_path = await render_video(fallback["narration"], video["image_paths"], audio_path, f"{video_id}_tt")
+        try:
+            os.remove(audio_path)
+        except Exception:
+            pass
         if not video_path:
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
             return None
     else:
         video_path = video["video_path"]
@@ -469,10 +471,6 @@ async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str
     recheck = await check_tiktok_compliance(fallback["caption"])
     if recheck:
         if video.get("image_paths"):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
             try:
                 os.remove(video_path)
             except Exception:
@@ -483,26 +481,13 @@ async def _attempt_tiktok_fallback(video_id: str, video: dict, block_reason: str
     if not tiktok_url:
         if video.get("image_paths"):
             try:
-                os.remove(audio_path)
-            except Exception:
-                pass
-            try:
                 os.remove(video_path)
             except Exception:
                 pass
         return None
 
-    if video.get("image_paths"):
-        try:
-            os.remove(audio_path)
-        except Exception:
-            pass
-        try:
-            os.remove(video_path)
-        except Exception:
-            pass
-
-    return tiktok_url, "переозвучено под TikTok" if video.get("image_paths") else "новый текст под TikTok"
+    note = "переозвучено под TikTok" if video.get("image_paths") else "новый текст под TikTok"
+    return tiktok_url, note, video_path, fallback["caption"]
 
 async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     """После успешной загрузки на YouTube: анонсирует в канале, пробует TikTok
@@ -516,8 +501,10 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
 
     if block_reason:
         fallback_result = await _attempt_tiktok_fallback(video_id, video, block_reason) if block_reason != FAIL_CLOSED_REASON else None
+        safe_video_path = None
+        safe_caption = None
         if fallback_result:
-            tiktok_url, note = fallback_result
+            tiktok_url, note, safe_video_path, safe_caption = fallback_result
             status_lines.append(f"✅ TikTok: {tiktok_url} ({note})")
         else:
             status_lines.append(f"⚠️ TikTok пропущен: {block_reason}")
@@ -525,14 +512,37 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
         tiktok_url = await upload_to_tiktok(video["video_path"], _tiktok_caption(video))
         if tiktok_url:
             status_lines.append(f"✅ TikTok: {tiktok_url}")
+            safe_video_path = video["video_path"]
+            safe_caption = _tiktok_caption(video)
         else:
             status_lines.append(f"⚠️ TikTok не удался — /retry_tiktok {video_id}")
             tiktok_retry_pending[video_id] = video
             save_tiktok_retry_pending()
+            safe_video_path = None
+            safe_caption = None
+
+    extra_cleanup_path = safe_video_path if safe_video_path and safe_video_path != video["video_path"] else None
 
     if video["category"] == "catapult":
         status_lines.append("ℹ️ Instagram пропущен для Catapult (риск ограничения аккаунта за финансовую тематику)")
         instagram_url = None
+    elif video["category"] == "forexbot":
+        # Instagram не имеет своей проверки на финансовые обещания (в отличие от
+        # TikTok) — переиспользуем ту же безопасную версию, что прошла для TikTok,
+        # вместо отдельной генерации. Если безопасной версии нет (TikTok тоже не
+        # прошёл) — просто пропускаем, без ретрая: копить именно эту неудачу
+        # некуда, свежее видео придёт со следующим слотом.
+        if safe_video_path:
+            instagram_url, ig_error = await upload_reel_to_instagram(safe_video_path, safe_caption, video["category"])
+            label = " (нейтральная версия)" if extra_cleanup_path else ""
+        else:
+            instagram_url, ig_error = None, "нет безопасной версии — TikTok тоже не прошёл"
+            label = ""
+        if instagram_url:
+            status_lines.append(f"✅ Instagram: {instagram_url}{label}")
+        else:
+            reason = f" ({ig_error})" if ig_error else ""
+            status_lines.append(f"⚠️ Instagram не удался{reason}")
     else:
         instagram_url, ig_error = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
         if instagram_url:
@@ -542,6 +552,12 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
             status_lines.append(f"⚠️ Instagram не удался{reason} — /retry_instagram {video_id}")
             instagram_retry_pending[video_id] = video
         save_instagram_retry_pending()
+
+    if extra_cleanup_path:
+        try:
+            os.remove(extra_cleanup_path)
+        except Exception:
+            pass
 
     if video_id not in tiktok_retry_pending and video_id not in instagram_retry_pending:
         try:
@@ -609,6 +625,13 @@ async def retry_instagram_upload(video_id: str):
         instagram_retry_pending.pop(video_id, None)
         save_instagram_retry_pending()
         await notify_admin(f"ℹ️ {video_id}: Instagram пропущен для Catapult (риск ограничения аккаунта), убрано из очереди ретраев.")
+        return
+    if video["category"] == "forexbot":
+        # forexbot публикуется в Instagram только безопасной (TikTok-нейтральной)
+        # версией, которую этот путь не может восстановить — не ретраим оригиналом.
+        instagram_retry_pending.pop(video_id, None)
+        save_instagram_retry_pending()
+        await notify_admin(f"ℹ️ {video_id}: Instagram для forexbot ретраится только автоматически вместе с TikTok, убрано из очереди.")
         return
     instagram_url, _ = await upload_reel_to_instagram(video["video_path"], _tiktok_caption(video), video["category"])
     if not instagram_url:

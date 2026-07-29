@@ -14,6 +14,7 @@ SEARCH_KEYWORDS = {
     "ai":       "искусственный интеллект заработок",
     "forex":    "форекс трейдинг",
     "catapult": "crypto трейдинг платформа",
+    "forexbot": "форекс автотрейдинг робот",
 }
 
 COINGECKO_TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending"

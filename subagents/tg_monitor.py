@@ -33,7 +33,11 @@ CHANNELS = {
     ],
     "catapult": [
         "letsCatapult", "to_the_makemoney", "airolejon", "catapult_community"
-    ]
+    ],
+    "forexbot": [
+        "PROFiInvest", "tradeforexexchange", "premiumgolubev",
+        "markoptions", "newwavetrade", "goldenonemoney", "uiartemzvezdin"
+    ],
 }
 
 # ── Состояние ─────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ CONTEXT_BY_CATEGORY = {
     "ai":       "искусственный интеллект, нейросети, AI инструменты для заработка",
     "forex":    "Forex, валютные пары, трейдинг, аналитика рынка",
     "catapult": "торговую платформу Catapult Trade",
+    "forexbot": "наш автоматический торговый бот для форекса — исполнение сигналов, управление рисками, автоматизация",
 }
 
 CATEGORY_LABELS = {
@@ -23,6 +24,7 @@ CATEGORY_LABELS = {
     "ai":       "AI",
     "forex":    "Forex",
     "catapult": "Catapult",
+    "forexbot": "AutoTrade",
 }
 
 SOCIAL_FOOTER = (

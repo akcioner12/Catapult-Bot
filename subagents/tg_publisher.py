@@ -35,7 +35,7 @@ CHANNEL_SIGNATURE = """
 ———
 🔔 Подпишись и не пропусти важное
 
-▶️ <a href="https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg">YouTube</a> | 💬 <a href="https://t.me/Crypto_AI_Forex_Chat">TG Chat</a> | 🎵 <a href="https://tiktok.com/@crypto.ai.forex">TikTok</a> | 📷 <a href="https://www.instagram.com/crypto.ai.forex/">Instagram</a> | 🤖 <a href="https://t.me/catapulttrade_guide_bot">TG Bot</a> | 🐦 <a href="https://x.com/cryptoaiforex">Twitter</a>"""
+▶️ <a href="https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg">YouTube</a> | 💬 <a href="https://t.me/Crypto_AI_Forex_Chat">TG Chat</a> | 🎵 <a href="https://tiktok.com/@crypto.ai.forex">TikTok</a> | 📷 <a href="https://www.instagram.com/crypto.ai.forex/">Instagram</a> | 🐦 <a href="https://x.com/cryptoaiforex">Twitter</a>"""
 
 # ── Состояние ─────────────────────────────────────────────────────────────────
 pending_posts: dict = {}
@@ -608,7 +608,7 @@ async def auto_approve_post(post_text: str, category: str, slot: str, brief: str
     approved_queue[slot] = post
     save_approved()
 
-    emoji_map = {"crypto": "🪙 КРИПТА", "ai": "🤖 ИИ", "forex": "💹 ФОРЕКС", "catapult": "💰 CATAPULT TRADE", "poll": "📊 ОПРОС"}
+    emoji_map = {"crypto": "🪙 КРИПТА", "ai": "🤖 ИИ", "forex": "💹 ФОРЕКС", "catapult": "💰 CATAPULT TRADE", "forexbot": "⚙️ FOREXBOT", "poll": "📊 ОПРОС"}
     time_map = {"crypto_1": "09:00", "catapult_1": "11:00", "ai": "13:00", "catapult_2": "15:00", "poll": "16:30", "forex": "18:00", "crypto_2": "20:00"}
     label = emoji_map.get(category, category.upper())
     pub_time = time_map.get(slot, "??:??")

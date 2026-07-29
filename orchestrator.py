@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta
 import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
-from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES
+from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES, generate_forexbot_post, FOREXBOT_ANGLES
 from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard, breaking_already_posted_today, catapult_already_posted_today, mark_breaking_posted
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
@@ -77,6 +77,11 @@ POLL_TOPICS = [
 
 # ── Состояние ─────────────────────────────────────────────────────────────────
 catapult_angle_idx: int = 0   # текущий угол Catapult
+forexbot_angle_idx: int = 0   # текущий угол forexbot (fallback, если в источниках пусто)
+
+# Дни недели (по дню публикации, не по дню генерации накануне), когда слот
+# catapult_1 (11:00) остаётся про Catapult — остальные дни отдаются forexbot.
+CATAPULT_TEXT_DAYS = {"tue", "fri"}
 poll_idx: int = 0             # текущий fallback-опрос (если генерация не удалась)
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "раз в 2 дня"
 self_record_category_idx: int = 0  # текущая категория для предложения самозаписи
@@ -254,7 +259,7 @@ async def check_breaking_news():
 
 # ── Вечерняя генерация (20:00) ────────────────────────────────────────────────
 async def evening_generation():
-    global catapult_angle_idx, poll_idx
+    global catapult_angle_idx, forexbot_angle_idx, poll_idx
     logger.info("=== Вечерняя генерация постов ===")
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -284,16 +289,29 @@ async def evening_generation():
         for p in crypto_posts:
             sent_hashes.add(p["hash"])
 
-    # 2. Catapult #1 (11:00)
-    catapult_posts = await collect_top_posts("catapult")
-    if catapult_posts:
-        text = await generate_post_claude(catapult_posts, "catapult")
-        await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"])
+    # 2. Catapult #1 / forexbot (11:00) — публикуется завтра, поэтому смотрим на
+    # день недели ЗАВТРА, а не сегодня, чтобы попасть в CATAPULT_TEXT_DAYS верно.
+    tomorrow_day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][(datetime.now(KYIV_TZ) + timedelta(days=1)).weekday()]
+    if tomorrow_day_key in CATAPULT_TEXT_DAYS:
+        catapult_posts = await collect_top_posts("catapult")
+        if catapult_posts:
+            text = await generate_post_claude(catapult_posts, "catapult")
+            await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"])
+        else:
+            angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
+            catapult_angle_idx += 1
+            text = await generate_catapult_post(angle1)
+            await _auto_post(text, "catapult", "catapult_1")
     else:
-        angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
-        catapult_angle_idx += 1
-        text = await generate_catapult_post(angle1)
-        await _auto_post(text, "catapult", "catapult_1")
+        forexbot_posts = await collect_top_posts("forexbot")
+        if forexbot_posts:
+            text = await generate_post_claude(forexbot_posts, "forexbot")
+            await _auto_post(text, "forexbot", "catapult_1", forexbot_posts[0]["channel"])
+        else:
+            angle1 = FOREXBOT_ANGLES[forexbot_angle_idx % len(FOREXBOT_ANGLES)]
+            forexbot_angle_idx += 1
+            text = await generate_forexbot_post(angle1)
+            await _auto_post(text, "forexbot", "catapult_1")
 
     # 3. ИИ (13:00)
     ai_posts = await collect_top_posts("ai")
@@ -402,7 +420,7 @@ async def _collect_topic_source(category: str) -> str:
 # ── Дайджест тем + готовых комментариев для ручного engagement в TikTok/Instagram ──
 async def get_engagement_digest() -> str:
     lines = ["💬 <b>Идеи для комментариев в TikTok/Instagram</b>\n"]
-    for category in ["crypto", "ai", "forex", "catapult"]:
+    for category in ["crypto", "ai", "forex", "catapult", "forexbot"]:
         topic_source = await _collect_topic_source(category)
         idea = await generate_engagement_idea(topic_source, category)
         if not idea:
@@ -501,7 +519,7 @@ async def propose_self_record_script():
     global self_record_category_idx
     logger.info("=== Предложение темы для самозаписи ===")
 
-    categories = ["crypto", "ai", "forex", "catapult"]
+    categories = ["crypto", "ai", "forex", "catapult", "forexbot"]
     category = categories[self_record_category_idx % len(categories)]
     self_record_category_idx += 1
 
