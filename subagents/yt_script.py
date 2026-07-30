@@ -159,7 +159,8 @@ TAGS: <тег1, тег2, тег3>"""
         logger.error(f"Не удалось распарсить метаданные видео: {raw[:300]}")
         return None
     prefix = CATEGORY_LABELS.get(category, category.capitalize())
-    title = f"{prefix} | {title_match.group(1).strip()}"[:100]
+    hashtag = "#forexbot " if category == "forexbot" else ""
+    title = f"{hashtag}{prefix} | {title_match.group(1).strip()}"[:100]
     description = desc_match.group(1).strip() + "\n\n" + SOCIAL_FOOTER
     tags = [t.strip() for t in tags_match.group(1).split(",")] if tags_match else []
     if not title or not description:
