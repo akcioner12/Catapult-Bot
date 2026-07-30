@@ -1253,9 +1253,10 @@ async def main():
     scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=8,  minute=30, args=["forex"])
     scheduler.add_job(publish_due_slot, "cron", day_of_week="mon,wed,fri", hour=19, minute=0,  args=["crypto"])
     scheduler.add_job(publish_due_slot, "cron", day_of_week="tue,thu",     hour=18, minute=30, args=["ai"])
-    scheduler.add_job(publish_due_slot, "cron", day_of_week="tue,thu",     hour=20, minute=0,  args=["catapult"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="tue",         hour=20, minute=0,  args=["forexbot"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="thu",         hour=20, minute=0,  args=["catapult"])
     scheduler.add_job(publish_due_slot, "cron", day_of_week="sat",         hour=12, minute=30, args=["ai"])
-    scheduler.add_job(publish_due_slot, "cron", day_of_week="sat",         hour=14, minute=0,  args=["catapult"])
+    scheduler.add_job(publish_due_slot, "cron", day_of_week="sat",         hour=14, minute=0,  args=["forexbot"])
     scheduler.add_job(publish_due_slot, "cron", day_of_week="sun",         hour=12, minute=30, args=["crypto"])
     scheduler.add_job(publish_due_slot, "cron", day_of_week="sun",         hour=14, minute=0,  args=["ai"])
 
