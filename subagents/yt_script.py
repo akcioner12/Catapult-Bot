@@ -6,7 +6,7 @@ import logging
 
 import httpx
 
-from subagents.rewriter import CLAUDE_API_KEY, CLAUDE_API_URL
+from subagents.rewriter import CLAUDE_API_KEY, CLAUDE_API_URL, _record_claude_error
 from subagents.image_brief import CATEGORY_STYLE
 
 logger = logging.getLogger(__name__)
@@ -54,10 +54,12 @@ async def _call_claude(prompt: str, max_tokens: int) -> str | None:
             data = resp.json()
             if "content" not in data:
                 logger.error(f"Claude error: {data}")
+                _record_claude_error(data)
                 return None
             return data["content"][0]["text"]
     except Exception as e:
         logger.error(f"Claude call error: {e}")
+        _record_claude_error(e)
         return None
 
 # ── Сценарий для авто-озвучки ─────────────────────────────────────────────────

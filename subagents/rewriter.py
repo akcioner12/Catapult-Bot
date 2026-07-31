@@ -16,6 +16,29 @@ logger = logging.getLogger(__name__)
 CLAUDE_API_KEY   = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_API_URL   = "https://api.anthropic.com/v1/messages"
 
+# Причина последнего сбоя Claude API — чтобы вечерняя генерация могла честно
+# сообщить админу, ПОЧЕМУ пост/видео не сгенерировались, а не просто промолчать.
+LAST_CLAUDE_ERROR: str | None = None
+
+def _record_claude_error(detail) -> None:
+    global LAST_CLAUDE_ERROR
+    if isinstance(detail, dict):
+        message = str(detail.get("error", {}).get("message", detail))
+    else:
+        message = str(detail)
+    lowered = message.lower()
+    if "credit balance is too low" in lowered:
+        LAST_CLAUDE_ERROR = "закончился баланс Anthropic API"
+    elif "rate_limit" in lowered or "rate limit" in lowered:
+        LAST_CLAUDE_ERROR = "превышен лимит запросов Anthropic API"
+    elif "overloaded" in lowered:
+        LAST_CLAUDE_ERROR = "Anthropic API перегружен (высокая нагрузка)"
+    else:
+        LAST_CLAUDE_ERROR = message[:200] or "неизвестная ошибка Claude API"
+
+def get_last_claude_error() -> str | None:
+    return LAST_CLAUDE_ERROR
+
 # CTA для всех категорий, кроме catapult (у него свой бот — @catapulttrade_guide_bot)
 COMMUNITY_CHAT_LINK = "https://t.me/+dHTRhCHKKWw5Njdi"
 
@@ -115,9 +138,11 @@ async def generate_post_claude(posts: list, category: str) -> str:
             if "content" in data:
                 return data["content"][0]["text"]
             logger.error(f"Claude error: {data}")
+            _record_claude_error(data)
             return ""
     except Exception as e:
         logger.error(f"Claude error: {e}")
+        _record_claude_error(e)
         return ""
 
 # ── Claude API — пост о Catapult ──────────────────────────────────────────────
@@ -158,10 +183,13 @@ async def generate_catapult_post(angle: str) -> str:
             data = resp.json()
             if "content" in data:
                 return data["content"][0]["text"]
-            return "Пост о Catapult"
+            logger.error(f"Claude Catapult error: {data}")
+            _record_claude_error(data)
+            return ""
     except Exception as e:
         logger.error(f"Claude Catapult error: {e}")
-        return "Пост о Catapult"
+        _record_claude_error(e)
+        return ""
 
 # ── Углы для forexbot ─────────────────────────────────────────────────────────
 FOREXBOT_ANGLES = [
@@ -210,10 +238,13 @@ async def generate_forexbot_post(angle: str) -> str:
             data = resp.json()
             if "content" in data:
                 return data["content"][0]["text"]
-            return "Пост о торговом боте"
+            logger.error(f"Claude forexbot error: {data}")
+            _record_claude_error(data)
+            return ""
     except Exception as e:
         logger.error(f"Claude forexbot error: {e}")
-        return "Пост о торговом боте"
+        _record_claude_error(e)
+        return ""
 
 # ── Claude API — генерация опроса ──────────────────────────────────────────────
 async def generate_poll(recent_questions: list) -> dict | None:

@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta
 import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
-from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES, generate_forexbot_post, FOREXBOT_ANGLES
+from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES, generate_forexbot_post, FOREXBOT_ANGLES, get_last_claude_error
 from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard, breaking_already_posted_today, catapult_already_posted_today, mark_breaking_posted
 from subagents.image_brief import generate_image_brief
 from subagents.image_generator import generate_image
@@ -264,6 +264,8 @@ async def evening_generation():
     global catapult_angle_idx, forexbot_angle_idx, poll_idx
     logger.info("=== Вечерняя генерация постов ===")
 
+    failures: list[tuple[str, str]] = []
+
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
@@ -274,9 +276,11 @@ async def evening_generation():
             }
         )
 
-    async def _auto_post(text: str, category: str, slot: str, source: str = ""):
+    async def _auto_post(text: str, category: str, slot: str, source: str = "", label: str = ""):
         if not text:
-            logger.warning(f"[{slot}] Пустой текст поста — пропускаем (сбой генерации)")
+            reason = get_last_claude_error() or "пустой ответ от Claude"
+            logger.warning(f"[{slot}] Пустой текст поста — пропускаем (сбой генерации: {reason})")
+            failures.append((label or slot, reason))
             return
         brief = await generate_image_brief(text, category)
         photo_path = await generate_image(brief, f"{slot}_{int(datetime.utcnow().timestamp())}")
@@ -287,7 +291,7 @@ async def evening_generation():
     crypto_posts = await collect_top_posts("crypto")
     if crypto_posts:
         text = await generate_post_claude(crypto_posts, "crypto")
-        await _auto_post(text, "crypto", "crypto_1", crypto_posts[0]["channel"])
+        await _auto_post(text, "crypto", "crypto_1", crypto_posts[0]["channel"], label="Крипта #1 (09:00)")
         for p in crypto_posts:
             sent_hashes.add(p["hash"])
 
@@ -298,28 +302,28 @@ async def evening_generation():
         catapult_posts = await collect_top_posts("catapult")
         if catapult_posts:
             text = await generate_post_claude(catapult_posts, "catapult")
-            await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"])
+            await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"], label="Catapult (11:00)")
         else:
             angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
             catapult_angle_idx += 1
             text = await generate_catapult_post(angle1)
-            await _auto_post(text, "catapult", "catapult_1")
+            await _auto_post(text, "catapult", "catapult_1", label="Catapult (11:00)")
     else:
         forexbot_posts = await collect_top_posts("forexbot")
         if forexbot_posts:
             text = await generate_post_claude(forexbot_posts, "forexbot")
-            await _auto_post(text, "forexbot", "catapult_1", forexbot_posts[0]["channel"])
+            await _auto_post(text, "forexbot", "catapult_1", forexbot_posts[0]["channel"], label="Forexbot (11:00)")
         else:
             angle1 = FOREXBOT_ANGLES[forexbot_angle_idx % len(FOREXBOT_ANGLES)]
             forexbot_angle_idx += 1
             text = await generate_forexbot_post(angle1)
-            await _auto_post(text, "forexbot", "catapult_1")
+            await _auto_post(text, "forexbot", "catapult_1", label="Forexbot (11:00)")
 
     # 3. ИИ (13:00)
     ai_posts = await collect_top_posts("ai")
     if ai_posts:
         text = await generate_post_claude(ai_posts, "ai")
-        await _auto_post(text, "ai", "ai", ai_posts[0]["channel"])
+        await _auto_post(text, "ai", "ai", ai_posts[0]["channel"], label="AI (13:00)")
 
     # 4. Опрос (раз в 2 дня — 16:30) — авто-одобряем, с картинкой
     global last_poll_date
@@ -381,23 +385,33 @@ async def evening_generation():
     forex_posts = await collect_top_posts("forex")
     if forex_posts:
         text = await generate_post_claude(forex_posts, "forex")
-        await _auto_post(text, "forex", "forex", forex_posts[0]["channel"])
+        await _auto_post(text, "forex", "forex", forex_posts[0]["channel"], label="Forex (18:00)")
 
     # 6. Крипта #2 (20:00)
     crypto_posts_evening = await collect_top_posts("crypto")
     if crypto_posts_evening:
         text = await generate_post_claude(crypto_posts_evening, "crypto")
-        await _auto_post(text, "crypto", "crypto_2", crypto_posts_evening[0]["channel"])
+        await _auto_post(text, "crypto", "crypto_2", crypto_posts_evening[0]["channel"], label="Крипта #2 (20:00)")
     elif crypto_posts:
         text = await generate_post_claude(crypto_posts, "crypto")
-        await _auto_post(text, "crypto", "crypto_2", crypto_posts[0]["channel"])
+        await _auto_post(text, "crypto", "crypto_2", crypto_posts[0]["channel"], label="Крипта #2 (20:00)")
+
+    if failures:
+        failed_lines = "\n".join(f"• {label} — {reason}" for label, reason in failures)
+        summary_text = (
+            f"⚠️ <b>Генерация постов на завтра завершена С ОШИБКАМИ!</b>\n\n"
+            f"Не сгенерированы:\n{failed_lines}\n\n"
+            f"Эти слоты будут пропущены при публикации, остальные — по расписанию."
+        )
+    else:
+        summary_text = "✅ <b>Все посты подготовлены и одобрены автоматически!</b>\n\nОни опубликуются завтра по расписанию без твоего участия."
 
     async with httpx.AsyncClient(timeout=15) as client:
         await client.post(
             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": ADMIN_TG_ID,
-                "text": "✅ <b>Все посты подготовлены и одобрены автоматически!</b>\n\nОни опубликуются завтра по расписанию без твоего участия.",
+                "text": summary_text,
                 "parse_mode": "HTML"
             }
         )
@@ -439,7 +453,9 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
 
     script_data = await generate_video_script(topic_source, category)
     if not script_data:
-        logger.warning(f"_generate_and_queue_video[{category}]: сбой генерации сценария — пропускаем")
+        reason = get_last_claude_error() or "неизвестная ошибка Claude"
+        logger.warning(f"_generate_and_queue_video[{category}]: сбой генерации сценария — пропускаем ({reason})")
+        await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой генерации сценария. Причина: {reason}")
         return
 
     timestamp = int(datetime.utcnow().timestamp())
@@ -447,6 +463,7 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
     audio_path = await generate_voiceover(script_data["narration"], f"short_{timestamp}", voice_id=voice_id)
     if not audio_path:
         logger.warning(f"_generate_and_queue_video[{category}]: сбой озвучки — пропускаем")
+        await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой озвучки ElevenLabs (см. логи Railway).")
         return
 
     avatar_video_path = None
@@ -462,6 +479,7 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
             image_paths.append(path)
     if not image_paths:
         logger.warning(f"_generate_and_queue_video[{category}]: не удалось сгенерировать картинки — пропускаем")
+        await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой генерации картинок Gemini (см. логи Railway).")
         return
 
     video_path = await render_video(
@@ -470,11 +488,14 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
     )
     if not video_path:
         logger.warning(f"_generate_and_queue_video[{category}]: сбой рендера видео — пропускаем")
+        await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой рендера ffmpeg (см. логи Railway).")
         return
 
     metadata = await generate_video_metadata(category, script_data["narration"], category)
     if not metadata:
-        logger.warning(f"_generate_and_queue_video[{category}]: сбой генерации метаданных — пропускаем")
+        reason = get_last_claude_error() or "неизвестная ошибка Claude"
+        logger.warning(f"_generate_and_queue_video[{category}]: сбой генерации метаданных — пропускаем ({reason})")
+        await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой генерации метаданных (заголовок/описание). Причина: {reason}")
         return
 
     await send_video_for_approval(
