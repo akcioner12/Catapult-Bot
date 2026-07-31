@@ -21,6 +21,7 @@ from subagents.engagement_ideas import generate_engagement_idea
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
+from subagents.avatar_generator import generate_avatar_video
 from subagents.yt_publisher import send_video_for_approval, awaiting_self_record_video, create_upload_token, pop_pending_uploads, WEEKLY_SCHEDULE, lookup_schedule_slot, notify_admin, KYIV_TZ
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 PARSER_BOT_TOKEN = os.getenv("PARSER_BOT_TOKEN")
 ADMIN_TG_ID      = int(os.getenv("ADMIN_TG_ID", "0"))
 BACKEND_URL = os.getenv("BACKEND_URL", "https://web-production-9851f.up.railway.app")
+ELEVENLABS_AVATAR_VOICE_ID = os.getenv("ELEVENLABS_AVATAR_VOICE_ID", "")
 
 # ── Расписание публикаций (следующий день) ────────────────────────────────────
 PUBLISH_SCHEDULE = [
@@ -441,10 +443,17 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
         return
 
     timestamp = int(datetime.utcnow().timestamp())
-    audio_path = await generate_voiceover(script_data["narration"], f"short_{timestamp}")
+    voice_id = ELEVENLABS_AVATAR_VOICE_ID if category == "forexbot" else None
+    audio_path = await generate_voiceover(script_data["narration"], f"short_{timestamp}", voice_id=voice_id)
     if not audio_path:
         logger.warning(f"_generate_and_queue_video[{category}]: сбой озвучки — пропускаем")
         return
+
+    avatar_video_path = None
+    if category == "forexbot":
+        avatar_video_path = await generate_avatar_video(audio_path, f"short_{timestamp}_avatar")
+        if not avatar_video_path:
+            logger.warning(f"_generate_and_queue_video[{category}]: не удалось сгенерировать аватар — рендерим без него")
 
     image_paths = []
     for i, brief in enumerate(script_data["image_briefs"]):
@@ -455,7 +464,10 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
         logger.warning(f"_generate_and_queue_video[{category}]: не удалось сгенерировать картинки — пропускаем")
         return
 
-    video_path = await render_video(script_data["narration"], image_paths, audio_path, f"short_{timestamp}")
+    video_path = await render_video(
+        script_data["narration"], image_paths, audio_path, f"short_{timestamp}",
+        avatar_video_path=avatar_video_path,
+    )
     if not video_path:
         logger.warning(f"_generate_and_queue_video[{category}]: сбой рендера видео — пропускаем")
         return

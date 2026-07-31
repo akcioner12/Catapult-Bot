@@ -15,15 +15,17 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 AUDIO_DIR = "/data/audio"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-async def generate_voiceover(script_text: str, filename: str) -> str | None:
-    """Генерирует mp3-озвучку через ElevenLabs. Возвращает путь к файлу или None."""
-    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+async def generate_voiceover(script_text: str, filename: str, voice_id: str | None = None) -> str | None:
+    """Генерирует mp3-озвучку через ElevenLabs. voice_id переопределяет голос по умолчанию
+    (используется для аватар-видео — клонированный голос вместо стандартного). Возвращает путь к файлу или None."""
+    voice = voice_id or ELEVENLABS_VOICE_ID
+    if not ELEVENLABS_API_KEY or not voice:
         logger.warning("ELEVENLABS_API_KEY/ELEVENLABS_VOICE_ID не заданы — пропускаем озвучку")
         return None
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
                 headers={
                     "xi-api-key": ELEVENLABS_API_KEY,
                     "Content-Type": "application/json",

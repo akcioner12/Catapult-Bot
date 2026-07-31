@@ -15,10 +15,14 @@ logger = logging.getLogger(__name__)
 VIDEOS_DIR = "/data/videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
-FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts")
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+FONTS_DIR = os.path.join(ASSETS_DIR, "fonts")
+AVATAR_MASK_PATH = os.path.join(ASSETS_DIR, "avatar_mask_circle.png")
 
 RENDER_TIMEOUT_SECONDS = 300
 FPS = 25
+AVATAR_SIZE = 380
+AVATAR_MARGIN = 40
 
 
 def _escape_ffmpeg_path(path: str) -> str:
@@ -85,8 +89,46 @@ def _build_ffmpeg_command(image_paths: list[str], audio_path: str, ass_path: str
     return cmd
 
 
-async def render_video(script_text: str, image_paths: list[str], audio_path: str, filename: str) -> str | None:
-    """Рендерит вертикальное видео 1080x1920 локальным ffmpeg. None при сбое/таймауте."""
+def _build_avatar_overlay_command(base_path: str, avatar_video_path: str, output_path: str) -> list[str]:
+    filter_complex = (
+        f"[1:v]scale={AVATAR_SIZE}:{AVATAR_SIZE},setsar=1,format=rgba[av];"
+        f"[2:v]scale={AVATAR_SIZE}:{AVATAR_SIZE},format=gray[mask];"
+        f"[av][mask]alphamerge[circ];"
+        f"[0:v][circ]overlay=W-w-{AVATAR_MARGIN}:H-h-{AVATAR_MARGIN}:shortest=1[vout]"
+    )
+    return [
+        "ffmpeg", "-y",
+        "-i", base_path,
+        "-i", avatar_video_path,
+        "-i", AVATAR_MASK_PATH,
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", "0:a",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-shortest",
+        output_path,
+    ]
+
+
+async def _run_ffmpeg(cmd: list[str], step: str) -> bool:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT_SECONDS)
+    if proc.returncode != 0:
+        logger.error(f"ffmpeg {step} failed: {stderr.decode()[-2000:]}")
+        return False
+    return True
+
+
+async def render_video(
+    script_text: str, image_paths: list[str], audio_path: str, filename: str,
+    avatar_video_path: str | None = None,
+) -> str | None:
+    """Рендерит вертикальное видео 1080x1920 локальным ffmpeg. avatar_video_path — опциональное
+    видео говорящей головы (см. avatar_generator.py), накладывается кружком в правый нижний угол.
+    None при сбое/таймауте."""
     if not image_paths or not audio_path:
         logger.warning("render_video: нет картинок или озвучки — пропускаем")
         return None
@@ -94,18 +136,20 @@ async def render_video(script_text: str, image_paths: list[str], audio_path: str
     try:
         audio_duration = await _ffprobe_duration(audio_path)
         ass_path = f"{VIDEOS_DIR}/{filename}.ass"
-        build_ass_subtitles(script_text, audio_duration, ass_path)
+        build_ass_subtitles(script_text, audio_duration, ass_path, avatar_safe=bool(avatar_video_path))
 
         output_path = f"{VIDEOS_DIR}/{filename}.mp4"
-        cmd = _build_ffmpeg_command(image_paths, audio_path, ass_path, audio_duration, output_path)
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT_SECONDS)
-        if proc.returncode != 0:
-            logger.error(f"ffmpeg render failed: {stderr.decode()[-2000:]}")
+        base_path = f"{VIDEOS_DIR}/{filename}_base.mp4" if avatar_video_path else output_path
+        cmd = _build_ffmpeg_command(image_paths, audio_path, ass_path, audio_duration, base_path)
+        if not await _run_ffmpeg(cmd, "slides render"):
             return None
+
+        if avatar_video_path:
+            overlay_cmd = _build_avatar_overlay_command(base_path, avatar_video_path, output_path)
+            ok = await _run_ffmpeg(overlay_cmd, "avatar overlay")
+            os.remove(base_path)
+            if not ok:
+                return None
 
         logger.info(f"✅ Видео отрендерено: {output_path}")
         return output_path
