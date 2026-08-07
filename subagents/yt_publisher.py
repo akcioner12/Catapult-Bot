@@ -472,14 +472,16 @@ STORY_SOCIAL_FOOTER = (
     "Twitter/X:   https://x.com/cryptoaiforex"
 )
 
-STORY_OFFER = "🔥 Топовые тренды, ниши и рабочие способы заработка — раньше всех, подписывайся:"
+STORY_OFFER_DEFAULT = "🔥 Топовые тренды, ниши и рабочие способы заработка — раньше всех, подписывайся:"
+STORY_OFFER_FOREXBOT = "🤖 Наш бот торгует на Forex автоматически и приносит профит — подключайся и приумножай депозит:"
 
 def _story_caption(video: dict) -> str:
     # Короткое описание — первая строка/абзац YouTube-описания (без футера),
     # без отдельного вызова Claude — переиспользуем то, что уже сгенерировано.
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     short_desc = body.split("\n")[0].strip()[:200]
-    return f"{video['title']}\n\n{short_desc}\n\n{STORY_OFFER}\n{STORY_SOCIAL_FOOTER}"
+    offer = STORY_OFFER_FOREXBOT if video["category"] == "forexbot" else STORY_OFFER_DEFAULT
+    return f"{video['title']}\n\n{short_desc}\n\n{offer}\n{STORY_SOCIAL_FOOTER}"
 
 def _story_channel_link() -> str:
     return f"https://t.me/{CHANNEL_ID.lstrip('@')}"
