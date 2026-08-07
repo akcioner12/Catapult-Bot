@@ -71,6 +71,10 @@ async def publish_to_buffer(
                 },
             )
             data = resp.json()
+            if data.get("errors"):
+                reason = data["errors"][0].get("message", "неизвестная ошибка Buffer")
+                logger.error(f"Buffer createPost top-level error: {data['errors']}")
+                return None, reason
             result = data.get("data", {}).get("createPost", {})
             if "message" in result:
                 logger.error(f"Buffer createPost error: {result['message']}")
@@ -87,7 +91,12 @@ async def publish_to_buffer(
                     headers=headers,
                     json={"query": POST_STATUS_QUERY, "variables": {"id": post_id}},
                 )
-                post = status_resp.json().get("data", {}).get("post", {})
+                status_data = status_resp.json()
+                if status_data.get("errors"):
+                    reason = status_data["errors"][0].get("message", "неизвестная ошибка Buffer")
+                    logger.error(f"Buffer status poll top-level error: {status_data['errors']}")
+                    return None, reason
+                post = status_data.get("data", {}).get("post", {})
                 if post.get("status") == "sent":
                     logger.info(f"✅ Опубликовано через Buffer: {post['externalLink']}")
                     return post["externalLink"], None
