@@ -35,7 +35,7 @@ from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDU
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, approved_videos, awaiting_self_record_video, tiktok_retry_pending, failed_uploads,
-    instagram_retry_pending, save_pending_videos, load_pending_videos, handle_video_approval,
+    instagram_retry_pending, story_retry_pending, save_pending_videos, load_pending_videos, handle_video_approval,
     handle_video_file, publish_due_slot,
 )
 
@@ -180,6 +180,25 @@ async def cmd_retry_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE
     for video_id in list(instagram_retry_pending.keys()):
         await yt_publisher.retry_instagram_upload(video_id)
         await asyncio.sleep(30)
+
+async def cmd_retry_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    if context.args:
+        video_id = context.args[0]
+        if video_id not in story_retry_pending:
+            await update.message.reply_text(f"⚠️ «{video_id}» не найдено в очереди Stories.")
+            return
+        await update.message.reply_text("🔄 Повторная публикация в Stories...")
+        await yt_publisher.retry_story_upload(video_id)
+        return
+    if not story_retry_pending:
+        await update.message.reply_text("📭 Нет видео для повторной публикации в Stories.")
+        return
+    await update.message.reply_text(f"🔄 Повторная публикация {len(story_retry_pending)} видео в Stories...")
+    for video_id in list(story_retry_pending.keys()):
+        await yt_publisher.retry_story_upload(video_id)
+        await asyncio.sleep(5)
 
 async def cmd_engagement_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1207,6 +1226,7 @@ async def main():
     parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
     parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
+    parser_app.add_handler(CommandHandler("retry_story", cmd_retry_story))
     parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit|vpublishnow)_"))
     parser_app.add_handler(MessageHandler(filters.VIDEO & filters.User(ADMIN_TG_ID), handle_video_file))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
@@ -1309,6 +1329,7 @@ async def main():
         BotCommand("retry_videos", "Повторить загрузку неудачных видео на YouTube"),
         BotCommand("retry_tiktok", "Повторить публикацию в TikTok [id]"),
         BotCommand("retry_instagram", "Повторить публикацию в Instagram [id]"),
+        BotCommand("retry_story", "Повторить публикацию в Stories [id]"),
     ])
     await parser_app.start()
     await parser_app.updater.start_polling()

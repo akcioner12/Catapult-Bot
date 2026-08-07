@@ -9,3 +9,4 @@ beautifulsoup4==4.12.3
 google-api-python-client==2.149.0
 google-auth==2.35.0
 python-multipart==0.0.9
+telethon==1.44.0
