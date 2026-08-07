@@ -461,21 +461,25 @@ def _tiktok_caption(video: dict) -> str:
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     return f"{video['title']}\n\n{body}\n\n{TIKTOK_SOCIAL_FOOTER}"
 
-# Telegram-канал в Stories идёт отдельным кликабельным стикером-ссылкой (см.
-# telegram_story_publisher.py) — поэтому в текстовом футере его не дублируем.
+# Сторис публикуется от личного аккаунта (не от имени канала) — ссылка на
+# канал не самоссылка, поэтому идёт в тексте первой, плюс отдельно кликабельным
+# стикером поверх видео (см. telegram_story_publisher.py).
 STORY_SOCIAL_FOOTER = (
+    "Telegram канал:   https://t.me/Crypto_AI_Forex\n"
     "YouTube:   https://www.youtube.com/channel/UC9C6LiSOS6y2LhTfP15XpNg\n"
     "TikTok:   https://www.tiktok.com/@crypto.ai.forex\n"
     "Instagram:   https://www.instagram.com/crypto.ai.forex/\n"
     "Twitter/X:   https://x.com/cryptoaiforex"
 )
 
+STORY_OFFER = "🔥 Топовые тренды, ниши и рабочие способы заработка — раньше всех, подписывайся:"
+
 def _story_caption(video: dict) -> str:
     # Короткое описание — первая строка/абзац YouTube-описания (без футера),
     # без отдельного вызова Claude — переиспользуем то, что уже сгенерировано.
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     short_desc = body.split("\n")[0].strip()[:200]
-    return f"{video['title']}\n\n{short_desc}\n\n{STORY_SOCIAL_FOOTER}"
+    return f"{video['title']}\n\n{short_desc}\n\n{STORY_OFFER}\n{STORY_SOCIAL_FOOTER}"
 
 def _story_channel_link() -> str:
     return f"https://t.me/{CHANNEL_ID.lstrip('@')}"
