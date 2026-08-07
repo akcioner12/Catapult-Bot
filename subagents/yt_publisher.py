@@ -3,6 +3,7 @@ Sub-agent: approval-цикл для YouTube Shorts + загрузка на YouTu
 Зеркалит форму tg_publisher.py, но для видео.
 """
 import os
+import re
 import time
 import json
 import secrets
@@ -480,6 +481,9 @@ def _story_caption(video: dict) -> str:
     # без отдельного вызова Claude — переиспользуем то, что уже сгенерировано.
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     short_desc = body.split("\n")[0].strip()[:200]
+    # Личные сторис — без упоминания политических фигур по фамилии.
+    short_desc = re.sub(r"\bПутин\w*\b", "", short_desc, flags=re.IGNORECASE)
+    short_desc = re.sub(r"\s{2,}", " ", short_desc).strip()
     offer = STORY_OFFER_FOREXBOT if video["category"] == "forexbot" else STORY_OFFER_DEFAULT
     return f"{video['title']}\n\n{short_desc}\n\n{offer}\n{STORY_SOCIAL_FOOTER}"
 
