@@ -498,13 +498,16 @@ async def _generate_and_queue_video(category: str, planned_day: str, planned_tim
         await notify_admin(f"⚠️ <b>Видео [{category}] не сгенерировано</b>\n\nСбой генерации метаданных (заголовок/описание). Причина: {reason}")
         return
 
-    await send_video_for_approval(
+    sent = await send_video_for_approval(
         video_path, metadata["title"], metadata["description"], metadata["tags"], category,
         thumbnail_path=image_paths[0],
         planned_day=planned_day, planned_time=planned_time,
         narration=script_data["narration"], image_paths=image_paths,
     )
-    logger.info(f"✅ Видео готово и отправлено на одобрение: {category} ({planned_day} {planned_time})")
+    if sent:
+        logger.info(f"✅ Видео готово и отправлено на одобрение: {category} ({planned_day} {planned_time})")
+    else:
+        logger.warning(f"⚠️ Видео [{category}] сгенерировано, но превью не доставлено (см. уведомление админу)")
 
 async def generate_weekly_batch():
     logger.info("=== Еженедельная генерация 14 видео ===")

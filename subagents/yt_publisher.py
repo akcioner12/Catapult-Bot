@@ -219,7 +219,9 @@ async def send_video_for_approval(
     thumbnail_path: str | None = None,
     planned_day: str = "", planned_time: str = "",
     narration: str = "", image_paths: list[str] | None = None,
-):
+) -> bool:
+    """Возвращает True, если превью реально дошло до админа в Telegram, False —
+    если сбой (видео при этом уже сохранено в pending_videos, не теряется)."""
     video_id = f"{category}_{hashlib.md5((title + video_path).encode()).hexdigest()[:8]}"
     pending_videos[video_id] = {
         "video_path": video_path,
@@ -249,6 +251,7 @@ async def send_video_for_approval(
                     caption=caption,
                     parse_mode="HTML",
                     reply_markup=video_approval_keyboard(video_id),
+                    read_timeout=120, write_timeout=120, connect_timeout=30,
                 )
         else:
             await bot.send_message(
@@ -257,8 +260,17 @@ async def send_video_for_approval(
                 parse_mode="HTML",
                 reply_markup=video_approval_keyboard(video_id),
             )
+        return True
     except Exception as e:
         logger.error(f"send_video_for_approval error: {e}")
+        try:
+            await notify_admin(
+                f"⚠️ <b>Видео [{category}] сгенерировано, но превью не отправилось</b> ({e})\n\n"
+                f"Видео сохранено в очереди (id: <code>{video_id}</code>) — не потеряно, напиши мне, достану вручную."
+            )
+        except Exception:
+            pass
+        return False
 
 # ── Правка текста/caption сообщения-одобрения ──────────────────────────────
 async def _edit_status(query, text: str, **kwargs):
