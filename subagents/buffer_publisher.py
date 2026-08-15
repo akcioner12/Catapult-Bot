@@ -34,6 +34,18 @@ query($id: PostId!) {
 """
 
 
+def _parse_buffer_response(resp: httpx.Response, step: str) -> tuple[dict | None, str | None]:
+    """Возвращает (json, None) при успехе или (None, понятная_причина) если Buffer
+    вернул не-JSON (например 5xx с пустым/HTML телом — сервер Buffer недоступен,
+    а не ошибка в данных запроса). Никогда не бросает исключение."""
+    if resp.status_code >= 500:
+        return None, f"сервер Buffer не ответил (HTTP {resp.status_code}) при {step}"
+    try:
+        return resp.json(), None
+    except Exception:
+        return None, f"Buffer вернул нечитаемый ответ (HTTP {resp.status_code}) при {step}"
+
+
 async def publish_to_buffer(
     channel_id: str, caption: str, media_url: str, media_type: str, metadata: dict | None = None
 ) -> tuple[str | None, str | None]:
@@ -70,7 +82,10 @@ async def publish_to_buffer(
                     "variables": {"input": input_payload},
                 },
             )
-            data = resp.json()
+            data, err = _parse_buffer_response(resp, "создании поста")
+            if err:
+                logger.error(f"Buffer createPost transport error: {err}")
+                return None, err
             if data.get("errors"):
                 reason = data["errors"][0].get("message", "неизвестная ошибка Buffer")
                 logger.error(f"Buffer createPost top-level error: {data['errors']}")
@@ -91,7 +106,13 @@ async def publish_to_buffer(
                     headers=headers,
                     json={"query": POST_STATUS_QUERY, "variables": {"id": post_id}},
                 )
-                status_data = status_resp.json()
+                status_data, err = _parse_buffer_response(status_resp, "опросе статуса")
+                if err:
+                    # Разовый сбой самого опроса (не публикации) — Buffer уже дважды
+                    # реально публиковал пост, пока такая проверка статуса падала.
+                    # Пробуем ещё раз на следующей итерации, а не сдаёмся сразу.
+                    logger.warning(f"Buffer status poll transport error (retry): {err}")
+                    continue
                 if status_data.get("errors"):
                     reason = status_data["errors"][0].get("message", "неизвестная ошибка Buffer")
                     logger.error(f"Buffer status poll top-level error: {status_data['errors']}")
