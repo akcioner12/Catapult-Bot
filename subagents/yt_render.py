@@ -43,18 +43,27 @@ async def _ffprobe_duration(path: str) -> float:
     return float(stdout.decode().strip())
 
 
-def _build_ffmpeg_command(image_paths: list[str], audio_path: str, ass_path: str, audio_duration: float, output_path: str) -> list[str]:
-    duration_per_image = audio_duration / len(image_paths)
-    frames = max(int(duration_per_image * FPS), 1)
+def _build_ffmpeg_command(
+    image_paths: list[str], audio_path: str, ass_path: str, audio_duration: float, output_path: str,
+    slide_times: list[float] | None = None,
+) -> list[str]:
+    """slide_times — стартовые секунды каждой картинки (первая всегда 0), если нужен
+    ручной тайминг слайдов вместо равного деления длительности озвучки."""
+    if slide_times:
+        bounds = slide_times + [audio_duration]
+        durations = [bounds[i + 1] - bounds[i] for i in range(len(image_paths))]
+    else:
+        durations = [audio_duration / len(image_paths)] * len(image_paths)
 
     cmd = ["ffmpeg", "-y"]
-    for path in image_paths:
-        cmd += ["-loop", "1", "-t", f"{duration_per_image:.3f}", "-i", path]
+    for path, duration in zip(image_paths, durations):
+        cmd += ["-loop", "1", "-t", f"{duration:.3f}", "-i", path]
     cmd += ["-i", audio_path]
 
     filter_chains = []
     labels = []
-    for i in range(len(image_paths)):
+    for i, duration in enumerate(durations):
+        frames = max(int(duration * FPS), 1)
         # чередуем направление панорамирования — рецепт из документации ffmpeg
         # zoompan: старт на первом кадре (on==1), затем инкремент/декремент x за кадром
         if i % 2 == 0:
@@ -69,7 +78,7 @@ def _build_ffmpeg_command(image_paths: list[str], audio_path: str, ass_path: str
             # zoompan на зацикленной картинке (-loop 1 -t) не останавливается сам —
             # без trim первый сегмент генерирует кадры далеко за пределы своей
             # доли времени, и concat никогда не доходит до следующих картинок.
-            f"trim=duration={duration_per_image:.3f},setsar=1[{label}]"
+            f"trim=duration={duration:.3f},setsar=1[{label}]"
         )
         labels.append(f"[{label}]")
 
@@ -128,23 +137,30 @@ async def _run_ffmpeg(cmd: list[str], step: str) -> bool:
 
 async def render_video(
     script_text: str, image_paths: list[str], audio_path: str, filename: str,
-    avatar_video_path: str | None = None,
+    avatar_video_path: str | None = None, slide_times: list[float] | None = None,
 ) -> str | None:
     """Рендерит вертикальное видео 1080x1920 локальным ffmpeg. avatar_video_path — опциональное
     видео говорящей головы (см. avatar_generator.py), накладывается кружком в правый нижний угол.
-    None при сбое/таймауте."""
+    slide_times — стартовые секунды каждой картинки, если нужен ручной тайминг вместо
+    равного деления длительности озвучки. None при сбое/таймауте."""
     if not image_paths or not audio_path:
         logger.warning("render_video: нет картинок или озвучки — пропускаем")
+        return None
+    if slide_times and len(slide_times) != len(image_paths):
+        logger.error(f"render_video: slide_times ({len(slide_times)}) не совпадает по длине с image_paths ({len(image_paths)})")
         return None
 
     try:
         audio_duration = await _ffprobe_duration(audio_path)
+        if slide_times and slide_times[-1] >= audio_duration:
+            logger.error(f"render_video: последний slide_time ({slide_times[-1]}с) не помещается в длительность озвучки ({audio_duration:.1f}с)")
+            return None
         ass_path = f"{VIDEOS_DIR}/{filename}.ass"
         build_ass_subtitles(script_text, audio_duration, ass_path, avatar_safe=bool(avatar_video_path))
 
         output_path = f"{VIDEOS_DIR}/{filename}.mp4"
         base_path = f"{VIDEOS_DIR}/{filename}_base.mp4" if avatar_video_path else output_path
-        cmd = _build_ffmpeg_command(image_paths, audio_path, ass_path, audio_duration, base_path)
+        cmd = _build_ffmpeg_command(image_paths, audio_path, ass_path, audio_duration, base_path, slide_times=slide_times)
         if not await _run_ffmpeg(cmd, "slides render"):
             return None
 

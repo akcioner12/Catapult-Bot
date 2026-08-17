@@ -621,6 +621,7 @@ RESULT_VIDEO_NARRATION = (
     "Ссылка в описании."
 )
 RESULT_VIDEO_SHOT_COUNT = 4
+RESULT_VIDEO_SLIDE_TIMES = [0, 16, 35, 40]  # секунды, на которых открывается каждый следующий слайд
 RESULT_VIDEO_DIR = "/data/videos"
 os.makedirs(RESULT_VIDEO_DIR, exist_ok=True)
 awaiting_result_video_photos: dict = {}  # admin_id -> list[str] локальных путей к загруженным скриншотам
@@ -677,6 +678,7 @@ async def _build_result_video(image_paths: list[str]):
 
     video_path = await render_video(
         RESULT_VIDEO_NARRATION, image_paths, audio_path, filename, avatar_video_path=avatar_video_path,
+        slide_times=RESULT_VIDEO_SLIDE_TIMES,
     )
     if not video_path:
         await notify_admin("❌ Личное видео: сбой рендера ffmpeg (см. логи Railway).")
