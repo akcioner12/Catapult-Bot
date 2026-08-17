@@ -10,7 +10,7 @@ import re
 
 import httpx
 
-from subagents.rewriter import CLAUDE_API_KEY, CLAUDE_API_URL
+from subagents.rewriter import CLAUDE_API_KEY, CLAUDE_API_URL, NEUTRALITY_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,8 @@ async def generate_engagement_idea(topic_source: str, category: str) -> dict | N
 которых может не быть в найденном видео.
 — БЕЗ ссылок, БЕЗ "подписывайся", БЕЗ прямой рекламы — выглядит как спам и отталкивает.
 — 1-2 предложения, разговорный тон, без хэштегов.
+
+{NEUTRALITY_NOTE}
 
 Ответь СТРОГО в этом формате, без пояснений:
 QUERY: <запрос>
