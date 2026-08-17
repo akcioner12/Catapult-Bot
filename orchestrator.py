@@ -709,19 +709,27 @@ async def publish_result_video_now(skip_tiktok: bool = False) -> str:
     (минуя кнопки в Telegram) — без побочного планирования следующего слота,
     которое обычная кнопка «Опубликовать сейчас» запускает для forexbot."""
     from subagents.yt_publisher import (
-        pending_videos, save_pending_videos, failed_uploads, save_failed_uploads,
-        upload_to_youtube, _finish_publish,
+        pending_videos, save_pending_videos, approved_videos, save_approved_videos,
+        failed_uploads, save_failed_uploads, upload_to_youtube, _finish_publish,
     )
     video_id = next(
         (vid for vid, v in pending_videos.items() if v.get("narration") == RESULT_VIDEO_NARRATION),
         None,
     )
-    if not video_id:
-        return "📭 Нет ожидающего одобрения личного видео с результатами."
+    if video_id:
+        video = pending_videos.pop(video_id)
+        save_pending_videos()
+    else:
+        video_id = next(
+            (vid for vid, v in approved_videos.items() if v.get("narration") == RESULT_VIDEO_NARRATION),
+            None,
+        )
+        if not video_id:
+            return "📭 Нет ожидающего одобрения личного видео с результатами."
+        video = approved_videos.pop(video_id)
+        save_approved_videos()
 
-    video = pending_videos.pop(video_id)
     video["skip_tiktok"] = skip_tiktok
-    save_pending_videos()
 
     youtube_id = await upload_to_youtube(video["video_path"], video["title"], video["description"], video["tags"])
     if not youtube_id:
