@@ -608,3 +608,94 @@ async def process_self_record_uploads():
             )
         except Exception as e:
             logger.error(f"process_self_record_uploads error: {e}")
+
+# ── Личное видео с реальными результатами торговли (разовый ручной запуск) ───
+RESULT_VIDEO_NARRATION = (
+    "Друзья, всем привет! Хочу поделиться результатами месяца работы нашего торгового бота на форексе.\n"
+    "За последний месяц бот обработал 96 сигналов из закрытого трейдерского сообщества, при этом мой депозит "
+    "вырос на 35%. Это не разовая удача, а результат чёткой системы: бот сам заходит по всем сигналам, ставит "
+    "тейк профиты и стоп, переводит сделку в безубыток, когда рынок идёт в нашу сторону, и не торгует перед "
+    "важными новостями.\n"
+    "Вот реальные позиции с моего торгового счёта. И все это абсолютно без моего участия и на полном автомате.\n"
+    "Если хочешь, чтобы твой депозит работал также, заходи в наш чат, там всё расскажем и поможем подключиться. "
+    "Ссылка в описании."
+)
+RESULT_VIDEO_SHOT_COUNT = 4
+RESULT_VIDEO_DIR = "/data/videos"
+os.makedirs(RESULT_VIDEO_DIR, exist_ok=True)
+awaiting_result_video_photos: dict = {}  # admin_id -> list[str] локальных путей к загруженным скриншотам
+
+async def start_result_video_upload():
+    awaiting_result_video_photos[ADMIN_TG_ID] = []
+
+async def handle_result_video_photo(update, context) -> bool:
+    """True, если фото обработано этим флоу (админ ждал скриншот для личного видео)."""
+    admin_id = update.effective_user.id
+    if admin_id != ADMIN_TG_ID or admin_id not in awaiting_result_video_photos:
+        return False
+
+    photos = awaiting_result_video_photos[admin_id]
+    try:
+        photo = update.message.photo[-1]
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/getFile",
+                params={"file_id": photo.file_id},
+            )
+            file_path = resp.json()["result"]["file_path"]
+            file_resp = await client.get(f"https://api.telegram.org/file/bot{PARSER_BOT_TOKEN}/{file_path}")
+        local_path = f"{RESULT_VIDEO_DIR}/result_shot_{int(datetime.utcnow().timestamp() * 1000)}.jpg"
+        with open(local_path, "wb") as f:
+            f.write(file_resp.content)
+        photos.append(local_path)
+    except Exception as e:
+        logger.error(f"handle_result_video_photo error: {e}")
+        await update.message.reply_text(f"❌ Ошибка загрузки скриншота: {e}")
+        return True
+
+    if len(photos) < RESULT_VIDEO_SHOT_COUNT:
+        await update.message.reply_text(f"✅ Скриншот {len(photos)}/{RESULT_VIDEO_SHOT_COUNT} получен.")
+        return True
+
+    awaiting_result_video_photos.pop(admin_id, None)
+    await update.message.reply_text("⏳ Все скриншоты получены, рендерю видео (озвучка → аватар → монтаж)...")
+    await _build_result_video(photos)
+    return True
+
+async def _build_result_video(image_paths: list[str]):
+    timestamp = int(datetime.utcnow().timestamp())
+    filename = f"result_{timestamp}"
+
+    audio_path = await generate_voiceover(RESULT_VIDEO_NARRATION, filename, voice_id=ELEVENLABS_AVATAR_VOICE_ID)
+    if not audio_path:
+        await notify_admin("❌ Личное видео: сбой озвучки ElevenLabs (см. логи Railway).")
+        return
+
+    avatar_video_path = await generate_avatar_video(audio_path, f"{filename}_avatar")
+    if not avatar_video_path:
+        logger.warning("_build_result_video: не удалось сгенерировать аватар — рендерим без него")
+
+    video_path = await render_video(
+        RESULT_VIDEO_NARRATION, image_paths, audio_path, filename, avatar_video_path=avatar_video_path,
+    )
+    if not video_path:
+        await notify_admin("❌ Личное видео: сбой рендера ffmpeg (см. логи Railway).")
+        return
+
+    metadata = await generate_video_metadata("forexbot", RESULT_VIDEO_NARRATION, "forexbot")
+    if not metadata:
+        reason = get_last_claude_error() or "неизвестная ошибка Claude"
+        await notify_admin(f"❌ Личное видео: сбой генерации метаданных (заголовок/описание). Причина: {reason}")
+        return
+
+    planned_day, planned_time = lookup_schedule_slot("forexbot")
+    sent = await send_video_for_approval(
+        video_path, metadata["title"], metadata["description"], metadata["tags"], "forexbot",
+        thumbnail_path=image_paths[0],
+        planned_day=planned_day, planned_time=planned_time,
+        narration=RESULT_VIDEO_NARRATION, image_paths=image_paths,
+    )
+    if sent:
+        logger.info("✅ Личное видео готово и отправлено на одобрение")
+    else:
+        logger.warning("⚠️ Личное видео сгенерировано, но превью не доставлено")
