@@ -65,7 +65,11 @@ def _build_ffmpeg_command(image_paths: list[str], audio_path: str, ass_path: str
         filter_chains.append(
             f"[{i}:v]scale=2160:3840:flags=lanczos,"
             f"zoompan=z='min(zoom+0.0015,1.2)':d={frames}:"
-            f"x='{x_expr}':y='ih/2-(ih/zoom/2)':s=1080x1920:fps={FPS},setsar=1[{label}]"
+            f"x='{x_expr}':y='ih/2-(ih/zoom/2)':s=1080x1920:fps={FPS},"
+            # zoompan на зацикленной картинке (-loop 1 -t) не останавливается сам —
+            # без trim первый сегмент генерирует кадры далеко за пределы своей
+            # доли времени, и concat никогда не доходит до следующих картинок.
+            f"trim=duration={duration_per_image:.3f},setsar=1[{label}]"
         )
         labels.append(f"[{label}]")
 
