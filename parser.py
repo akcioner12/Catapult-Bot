@@ -31,7 +31,7 @@ from subagents.tg_publisher import (
     auto_publish, send_for_approval, handle_queue_action, preview_text,
     load_daily_state,
 )
-from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, generate_one_test_video, generate_tomorrows_videos, propose_self_record_script, process_self_record_uploads, get_engagement_digest, start_result_video_upload, handle_result_video_photo, RESULT_VIDEO_SHOT_COUNT
+from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, generate_one_test_video, generate_tomorrows_videos, propose_self_record_script, process_self_record_uploads, get_engagement_digest, start_result_video_upload, handle_result_video_photo, RESULT_VIDEO_SHOT_COUNT, publish_result_video_now
 import subagents.yt_publisher as yt_publisher
 from subagents.yt_publisher import (
     pending_videos, approved_videos, awaiting_self_record_video, tiktok_retry_pending, failed_uploads,
@@ -138,6 +138,13 @@ async def cmd_generate_result_video(update: Update, context: ContextTypes.DEFAUL
 
 async def handle_result_video_photo_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_result_video_photo(update, context)
+
+async def cmd_publish_result_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    await update.message.reply_text("🚀 Публикую личное видео сейчас, без TikTok...")
+    status = await publish_result_video_now(skip_tiktok=True)
+    await update.message.reply_text(status)
 
 async def cmd_generate_tomorrows_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_TG_ID:
@@ -1240,6 +1247,7 @@ async def main():
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
     parser_app.add_handler(CommandHandler("retry_story", cmd_retry_story))
     parser_app.add_handler(CommandHandler("generate_result_video", cmd_generate_result_video))
+    parser_app.add_handler(CommandHandler("publish_result_now", cmd_publish_result_now))
     parser_app.add_handler(CallbackQueryHandler(handle_video_approval, pattern="^(vapprove|vcancel|vedit|vpublishnow)_"))
     parser_app.add_handler(MessageHandler(filters.VIDEO & filters.User(ADMIN_TG_ID), handle_video_file))
     parser_app.add_handler(CallbackQueryHandler(handle_approval, pattern="^(approve|cancel|edit|rewrite|skipphoto)_"))
@@ -1345,6 +1353,7 @@ async def main():
         BotCommand("retry_instagram", "Повторить публикацию в Instagram [id]"),
         BotCommand("retry_story", "Повторить публикацию в Stories [id]"),
         BotCommand("generate_result_video", "Личное видео с результатами (нужны скриншоты)"),
+        BotCommand("publish_result_now", "Опубликовать личное видео сейчас (без TikTok)"),
     ])
     await parser_app.start()
     await parser_app.updater.start_polling()

@@ -555,9 +555,12 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
 
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
-    block_reason = await check_tiktok_compliance(_tiktok_caption(video))
 
-    if block_reason:
+    if video.get("skip_tiktok"):
+        status_lines.append("⏭️ TikTok пропущен (по запросу)")
+        safe_video_path = video["video_path"]
+        safe_caption = _tiktok_caption(video)
+    elif (block_reason := await check_tiktok_compliance(_tiktok_caption(video))):
         fallback_result = await _attempt_tiktok_fallback(video_id, video, block_reason) if block_reason != FAIL_CLOSED_REASON else None
         safe_video_path = None
         safe_caption = None
