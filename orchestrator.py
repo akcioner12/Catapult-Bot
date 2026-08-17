@@ -621,7 +621,8 @@ RESULT_VIDEO_NARRATION = (
     "Ссылка в описании."
 )
 RESULT_VIDEO_SHOT_COUNT = 4
-RESULT_VIDEO_SLIDE_TIMES = [0, 16, 35, 40]  # секунды, на которых открывается каждый следующий слайд
+RESULT_VIDEO_SLIDE_TIMES = [0, 10, 18, 36, 41, 46]  # секунды начала каждого сегмента тайминга
+RESULT_VIDEO_SLIDE_ORDER = [0, 1, 0, 2, 3, 0]  # индекс скриншота (по порядку загрузки, с 0) на каждый сегмент
 RESULT_VIDEO_DIR = "/data/videos"
 os.makedirs(RESULT_VIDEO_DIR, exist_ok=True)
 awaiting_result_video_photos: dict = {}  # admin_id -> list[str] локальных путей к загруженным скриншотам
@@ -676,8 +677,9 @@ async def _build_result_video(image_paths: list[str]):
     if not avatar_video_path:
         logger.warning("_build_result_video: не удалось сгенерировать аватар — рендерим без него")
 
+    slide_image_paths = [image_paths[i] for i in RESULT_VIDEO_SLIDE_ORDER]
     video_path = await render_video(
-        RESULT_VIDEO_NARRATION, image_paths, audio_path, filename, avatar_video_path=avatar_video_path,
+        RESULT_VIDEO_NARRATION, slide_image_paths, audio_path, filename, avatar_video_path=avatar_video_path,
         slide_times=RESULT_VIDEO_SLIDE_TIMES,
     )
     if not video_path:
