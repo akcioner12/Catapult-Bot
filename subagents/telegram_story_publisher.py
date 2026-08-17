@@ -31,11 +31,13 @@ MAX_VIDEO_BITRATE = 1_600_000
 LINK_AREA_COORDINATES = types.MediaAreaCoordinates(x=50.0, y=90.0, w=90.0, h=8.0, rotation=0.0)
 
 
-async def _ensure_safe_bitrate(video_path: str) -> str:
-    """Если битрейт видеодорожки выше MAX_VIDEO_BITRATE — перекодирует в отдельный
-    временный файл с ограниченным битрейтом. Иначе возвращает video_path без
-    изменений. При сбое перекодирования — тоже возвращает video_path (пусть
-    Telegram сам решит, не хуже, чем без перекодирования)."""
+async def _prepare_for_story(video_path: str) -> str:
+    """Готовит файл под Stories: если битрейт видеодорожки выше MAX_VIDEO_BITRATE —
+    перекодирует с ограниченным битрейтом (и сразу с faststart). Иначе делает
+    дешёвый remux (stream copy) под faststart — ffmpeg по умолчанию пишет moov atom
+    в конец файла, а Telegram при SendStoryRequest на таких файлах иногда отдаёт
+    MEDIA_FILE_INVALID, даже если кодек/битрейт в порядке. При сбое любого шага —
+    возвращает video_path без изменений (пусть Telegram сам решит)."""
     proc = await asyncio.create_subprocess_exec(
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=bit_rate", "-of", "csv=p=0", video_path,
@@ -45,25 +47,35 @@ async def _ensure_safe_bitrate(video_path: str) -> str:
     try:
         bitrate = int(stdout.decode().strip())
     except ValueError:
-        return video_path
-    if bitrate <= MAX_VIDEO_BITRATE:
+        bitrate = 0
+
+    if bitrate > MAX_VIDEO_BITRATE:
+        safe_path = f"{video_path.rsplit('.', 1)[0]}_storysafe.mp4"
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", video_path,
+            "-c:v", "libx264", "-b:v", str(MAX_VIDEO_BITRATE),
+            "-maxrate", str(MAX_VIDEO_BITRATE), "-bufsize", str(MAX_VIDEO_BITRATE * 2),
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+            safe_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info(f"Stories: перекодировано под безопасный битрейт ({bitrate} -> {MAX_VIDEO_BITRATE})")
+            return safe_path
+        logger.error(f"_prepare_for_story: ffmpeg re-encode failed: {stderr.decode()[-500:]}")
         return video_path
 
-    safe_path = f"{video_path.rsplit('.', 1)[0]}_storysafe.mp4"
+    faststart_path = f"{video_path.rsplit('.', 1)[0]}_faststart.mp4"
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-y", "-i", video_path,
-        "-c:v", "libx264", "-b:v", str(MAX_VIDEO_BITRATE),
-        "-maxrate", str(MAX_VIDEO_BITRATE), "-bufsize", str(MAX_VIDEO_BITRATE * 2),
-        "-c:a", "aac", "-b:a", "96k",
-        safe_path,
+        "ffmpeg", "-y", "-i", video_path, "-c", "copy", "-movflags", "+faststart", faststart_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:
-        logger.error(f"_ensure_safe_bitrate: ffmpeg re-encode failed: {stderr.decode()[-500:]}")
+        logger.error(f"_prepare_for_story: faststart remux failed: {stderr.decode()[-500:]}")
         return video_path
-    logger.info(f"Stories: перекодировано под безопасный битрейт ({bitrate} -> {MAX_VIDEO_BITRATE})")
-    return safe_path
+    return faststart_path
 
 
 async def post_story(video_path: str, caption: str, link_url: str) -> tuple[bool, str | None]:
@@ -77,7 +89,7 @@ async def post_story(video_path: str, caption: str, link_url: str) -> tuple[bool
         logger.error(f"post_story: файл не найден {video_path}")
         return False, "видео-файл не найден"
 
-    upload_path = await _ensure_safe_bitrate(video_path)
+    upload_path = await _prepare_for_story(video_path)
     client = TelegramClient(StringSession(TELEGRAM_SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
     try:
         await client.connect()
