@@ -29,7 +29,7 @@ from subagents.tg_publisher import (
     pending_posts, approved_queue, awaiting_photo, awaiting_photo_edit, editing_post,
     save_pending, load_pending, handle_approval, handle_photo,
     auto_publish, send_for_approval, handle_queue_action, preview_text,
-    load_daily_state,
+    load_daily_state, photo_instagram_retry_pending, retry_photo_instagram_upload,
 )
 from orchestrator import evening_generation, check_breaking_news, PUBLISH_SCHEDULE, load_poll_state, generate_weekly_batch, generate_one_test_video, generate_tomorrows_videos, propose_self_record_script, process_self_record_uploads, get_engagement_digest, start_result_video_upload, handle_result_video_photo, RESULT_VIDEO_SHOT_COUNT, publish_result_video_now
 import subagents.yt_publisher as yt_publisher
@@ -198,6 +198,25 @@ async def cmd_retry_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(f"🔄 Повторная публикация {len(instagram_retry_pending)} видео в Instagram (с паузами, чтобы не словить лимит Buffer)...")
     for video_id in list(instagram_retry_pending.keys()):
         await yt_publisher.retry_instagram_upload(video_id)
+        await asyncio.sleep(30)
+
+async def cmd_retry_instagram_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_TG_ID:
+        return
+    if context.args:
+        post_id = context.args[0]
+        if post_id not in photo_instagram_retry_pending:
+            await update.message.reply_text(f"⚠️ «{post_id}» не найдено в очереди Instagram.")
+            return
+        await update.message.reply_text("🔄 Повторная публикация в Instagram...")
+        await retry_photo_instagram_upload(post_id)
+        return
+    if not photo_instagram_retry_pending:
+        await update.message.reply_text("📭 Нет фото-постов для повторной публикации в Instagram.")
+        return
+    await update.message.reply_text(f"🔄 Повторная публикация {len(photo_instagram_retry_pending)} фото-постов в Instagram (с паузами, чтобы не словить лимит Buffer)...")
+    for post_id in list(photo_instagram_retry_pending.keys()):
+        await retry_photo_instagram_upload(post_id)
         await asyncio.sleep(30)
 
 async def cmd_retry_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1245,6 +1264,7 @@ async def main():
     parser_app.add_handler(CommandHandler("retry_videos", cmd_retry_videos))
     parser_app.add_handler(CommandHandler("retry_tiktok", cmd_retry_tiktok))
     parser_app.add_handler(CommandHandler("retry_instagram", cmd_retry_instagram))
+    parser_app.add_handler(CommandHandler("retry_instagram_photo", cmd_retry_instagram_photo))
     parser_app.add_handler(CommandHandler("retry_story", cmd_retry_story))
     parser_app.add_handler(CommandHandler("generate_result_video", cmd_generate_result_video))
     parser_app.add_handler(CommandHandler("publish_result_now", cmd_publish_result_now))
@@ -1351,6 +1371,7 @@ async def main():
         BotCommand("retry_videos", "Повторить загрузку неудачных видео на YouTube"),
         BotCommand("retry_tiktok", "Повторить публикацию в TikTok [id]"),
         BotCommand("retry_instagram", "Повторить публикацию в Instagram [id]"),
+        BotCommand("retry_instagram_photo", "Повторить публикацию фото-поста в Instagram [id]"),
         BotCommand("retry_story", "Повторить публикацию в Stories [id]"),
         BotCommand("generate_result_video", "Личное видео с результатами (нужны скриншоты)"),
         BotCommand("publish_result_now", "Опубликовать личное видео сейчас (без TikTok)"),

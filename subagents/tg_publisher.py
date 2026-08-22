@@ -42,9 +42,11 @@ pending_posts: dict = {}
 approved_queue: dict = {}
 awaiting_photo: dict = {}
 awaiting_photo_edit: dict = {}  # admin_id -> slot, замена картинки у поста уже в очереди
+photo_instagram_retry_pending: dict = {}  # post_id -> {brief, text, category}, сбой Instagram у уже опубликованного в TG фото-поста
 
 PENDING_FILE  = "/data/pending_posts.json"
 APPROVED_FILE = "/data/approved_queue.json"
+PHOTO_INSTAGRAM_RETRY_FILE = "/data/photo_instagram_retry_pending.json"
 PHOTOS_DIR    = "/data/photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
@@ -139,6 +141,41 @@ def load_pending():
             logger.info(f"Загружено {len(approved_queue)} approved постов")
     except Exception as e:
         logger.error(f"Load approved error: {e}")
+    try:
+        if os.path.exists(PHOTO_INSTAGRAM_RETRY_FILE):
+            with open(PHOTO_INSTAGRAM_RETRY_FILE, "r", encoding="utf-8") as f:
+                photo_instagram_retry_pending.update(json.load(f))
+            logger.info(f"Загружено {len(photo_instagram_retry_pending)} фото-постов на повтор Instagram")
+    except Exception as e:
+        logger.error(f"Load photo Instagram retry pending error: {e}")
+
+def save_photo_instagram_retry_pending():
+    try:
+        with open(PHOTO_INSTAGRAM_RETRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(photo_instagram_retry_pending, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.error(f"Save photo Instagram retry pending error: {e}")
+
+# ── Повтор публикации в Instagram для уже опубликованного в TG фото-поста ────
+async def retry_photo_instagram_upload(post_id: str) -> bool:
+    entry = photo_instagram_retry_pending.get(post_id)
+    if not entry:
+        return False
+    instagram_url, ig_error = await upload_photo_to_instagram(entry["brief"], entry["text"], entry["category"])
+    if not instagram_url:
+        return False
+    photo_instagram_retry_pending.pop(post_id, None)
+    save_photo_instagram_retry_pending()
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": ADMIN_TG_ID,
+                "text": f"✅ <b>Instagram опубликован (повтор)!</b>\n{instagram_url}",
+                "parse_mode": "HTML",
+            },
+        )
+    return True
 
 # ── Клавиатура одобрения ──────────────────────────────────────────────────────
 def approval_keyboard(post_id: str) -> dict:
@@ -669,11 +706,14 @@ async def publish_now(post: dict):
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                     elif ig_error:
+                        retry_id = f"{post['slot']}_{hashlib.md5(post['text'][:50].encode()).hexdigest()[:8]}"
+                        photo_instagram_retry_pending[retry_id] = {"brief": post["brief"], "text": post["text"], "category": category}
+                        save_photo_instagram_retry_pending()
                         await client.post(
                             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                             json={
                                 "chat_id": ADMIN_TG_ID,
-                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
+                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error} — /retry_instagram_photo {retry_id}",
                                 "parse_mode": "HTML",
                             },
                         )
@@ -751,11 +791,14 @@ async def auto_publish(slot: str):
                         if instagram_url:
                             logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                         elif ig_error:
+                            retry_id = f"{post['slot']}_{hashlib.md5(post['text'][:50].encode()).hexdigest()[:8]}"
+                            photo_instagram_retry_pending[retry_id] = {"brief": post["brief"], "text": post["text"], "category": category}
+                            save_photo_instagram_retry_pending()
                             await client.post(
                                 f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                                 json={
                                     "chat_id": ADMIN_TG_ID,
-                                    "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
+                                    "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error} — /retry_instagram_photo {retry_id}",
                                     "parse_mode": "HTML",
                                 },
                             )
@@ -795,11 +838,14 @@ async def auto_publish(slot: str):
                     if instagram_url:
                         logger.info(f"✅ Опубликовано в Instagram: {instagram_url}")
                     elif ig_error:
+                        retry_id = f"{post['slot']}_{hashlib.md5(post['text'][:50].encode()).hexdigest()[:8]}"
+                        photo_instagram_retry_pending[retry_id] = {"brief": post["brief"], "text": post["text"], "category": category}
+                        save_photo_instagram_retry_pending()
                         await client.post(
                             f"https://api.telegram.org/bot{PARSER_BOT_TOKEN}/sendMessage",
                             json={
                                 "chat_id": ADMIN_TG_ID,
-                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error}",
+                                "text": f"⚠️ Не удалось опубликовать фото-пост в Instagram: {ig_error} — /retry_instagram_photo {retry_id}",
                                 "parse_mode": "HTML",
                             },
                         )
