@@ -16,6 +16,12 @@ CONTENT_TYPE_STYLE = {
 }
 
 
+def _strip_html(text: str) -> str:
+    """source_text — исходный пост с Telegram-разметкой (<b>/<i>/<blockquote>/<a href>),
+    которую Instagram не понимает и показывает как есть — снимаем перед фолбэком."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
 async def generate_instagram_caption(source_text: str, category: str, content_type: str) -> dict:
     """content_type: "photo" или "reel". Возвращает {"caption": str, "hashtags": list[str]}.
     При сбое Claude или парсинга — возвращает исходный текст как caption и
@@ -60,11 +66,11 @@ HASHTAGS: #tag1 #tag2 #tag3 ..."""
             data = resp.json()
             if "content" not in data:
                 logger.error(f"Instagram caption Claude error: {data}")
-                return {"caption": source_text[:2000], "hashtags": []}
+                return {"caption": _strip_html(source_text)[:2000], "hashtags": []}
             raw = data["content"][0]["text"]
     except Exception as e:
         logger.error(f"generate_instagram_caption error: {e}")
-        return {"caption": source_text[:2000], "hashtags": []}
+        return {"caption": _strip_html(source_text)[:2000], "hashtags": []}
 
     return _parse_caption(raw, source_text)
 
@@ -74,7 +80,7 @@ def _parse_caption(raw: str, fallback_text: str) -> dict:
     hashtags_match = re.search(r"HASHTAGS:\s*(.+)", raw)
     if not caption_match:
         logger.error(f"Не удалось распарсить подпись Instagram: {raw[:300]}")
-        return {"caption": fallback_text[:2000], "hashtags": []}
+        return {"caption": _strip_html(fallback_text)[:2000], "hashtags": []}
     caption = caption_match.group(1).strip()
     hashtags = re.findall(r"#\w+", hashtags_match.group(1)) if hashtags_match else []
     return {"caption": caption, "hashtags": hashtags}
