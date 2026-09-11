@@ -20,10 +20,10 @@ from telegram.ext import ContextTypes
 from subagents.tiktok_publisher import upload_to_tiktok
 from subagents.instagram_publisher import upload_reel_to_instagram
 from subagents.tiktok_moderation import check_tiktok_compliance, FAIL_CLOSED_REASON
-from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script, SOCIAL_FOOTER as _YT_SOCIAL_FOOTER
+from subagents.yt_script import generate_video_metadata, generate_tiktok_safe_script, SOCIAL_FOOTER as _YT_SOCIAL_FOOTER, FOREX_AUTOTRADE_OFFER, FOREX_AUTOTRADE_CHAT_LINK
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
-from subagents.telegram_story_publisher import post_story
+from subagents.telegram_story_publisher import post_story, post_to_forex_edu_chat
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ WEEKLY_SCHEDULE = [
     {"day": "wed", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "wed", "hour": 19, "minute": 0,  "category": "crypto"},
     {"day": "thu", "hour": 18, "minute": 30, "category": "ai"},
-    {"day": "thu", "hour": 20, "minute": 0,  "category": "catapult"},
+    {"day": "thu", "hour": 20, "minute": 0,  "category": "forex"},
     {"day": "fri", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "fri", "hour": 19, "minute": 0,  "category": "crypto"},
     {"day": "sat", "hour": 12, "minute": 30, "category": "ai"},
@@ -441,9 +441,11 @@ async def upload_to_youtube(video_path: str, title: str, description: str, tags:
         logger.error(f"upload_to_youtube error: {e}")
         return None
 
-async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail_path: str | None = None):
+async def announce_in_telegram(youtube_video_id: str, title: str = "", thumbnail_path: str | None = None, category: str = ""):
     caption = f"🎬 <b>Новый ролик на YouTube!</b>\n\n📌 {title}\n\nhttps://youtu.be/{youtube_video_id}" if title \
         else f"🎬 <b>Новый ролик на YouTube!</b>\n\nhttps://youtu.be/{youtube_video_id}"
+    if category == "forex":
+        caption += f"\n\n{FOREX_AUTOTRADE_OFFER}"
     try:
         bot = Bot(token=MAIN_BOT_TOKEN)
         if thumbnail_path and os.path.exists(thumbnail_path):
@@ -470,7 +472,9 @@ TIKTOK_SOCIAL_FOOTER = (
 def _tiktok_caption(video: dict) -> str:
     # video["description"] заканчивается YouTube-футером (SOCIAL_FOOTER) — для
     # TikTok он не подходит (ссылается сам на себя, без YouTube), поэтому
-    # отрезаем его и подставляем TikTok-специфичный список соцсетей.
+    # отрезаем его и подставляем TikTok-специфичный список соцсетей. Для forex
+    # video["description"] уже содержит FOREX_AUTOTRADE_OFFER перед футером —
+    # он остаётся в body, отдельно ничего добавлять не нужно.
     body = video["description"].split(_YT_SOCIAL_FOOTER)[0].strip()
     return f"{video['title']}\n\n{body}\n\n{TIKTOK_SOCIAL_FOOTER}"
 
@@ -487,6 +491,7 @@ STORY_SOCIAL_FOOTER = (
 
 STORY_OFFER_DEFAULT = "🔥 Топовые тренды, ниши и рабочие способы заработка — раньше всех, подписывайся:"
 STORY_OFFER_FOREXBOT = "🤖 Наш бот торгует на Forex автоматически и приносит профит — подключайся и приумножай депозит:"
+STORY_OFFER_FOREX = f"🚀 Не знаете, с чего начать зарабатывать на Forex? Готовые точки входа + софт, который сам исполняет сделки — заходи в чат: {FOREX_AUTOTRADE_CHAT_LINK}"
 
 def _story_caption(video: dict) -> str:
     # Короткое описание — первая строка/абзац YouTube-описания (без футера),
@@ -496,7 +501,12 @@ def _story_caption(video: dict) -> str:
     # Личные сторис — без упоминания политических фигур по фамилии.
     short_desc = re.sub(r"\bПутин\w*\b", "", short_desc, flags=re.IGNORECASE)
     short_desc = re.sub(r"\s{2,}", " ", short_desc).strip()
-    offer = STORY_OFFER_FOREXBOT if video["category"] == "forexbot" else STORY_OFFER_DEFAULT
+    if video["category"] == "forex":
+        offer = STORY_OFFER_FOREX
+    elif video["category"] == "forexbot":
+        offer = STORY_OFFER_FOREXBOT
+    else:
+        offer = STORY_OFFER_DEFAULT
     return f"{video['title']}\n\n{short_desc}\n\n{offer}\n{STORY_SOCIAL_FOOTER}"
 
 def _story_channel_link() -> str:
@@ -552,7 +562,7 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
     (с одной попыткой более лояльного fallback-варианта при блоке) и Instagram
     Reels, и шлёт админу сводку по всем площадкам. Общий код для первого
     одобрения, /retry_videos и запланированной публикации."""
-    await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"))
+    await announce_in_telegram(youtube_id, video["title"], video.get("thumbnail_path"), video["category"])
 
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
 
@@ -625,6 +635,14 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
         save_story_retry_pending()
     # story_error is None и story_ok=False значит функция сама молча пропустила
     # публикацию (не настроены TELEGRAM_* переменные) — не показываем это как сбой.
+
+    if video["category"] == "forex":
+        chat_caption = f"{video['title']}\n\n{video['description'].split(_YT_SOCIAL_FOOTER)[0].strip()}"
+        chat_ok, chat_error = await post_to_forex_edu_chat(video["video_path"], chat_caption)
+        if chat_ok:
+            status_lines.append("✅ Отправлено в чат автотрейдинга")
+        elif chat_error is not None:
+            status_lines.append(f"⚠️ Не удалось отправить в чат автотрейдинга ({chat_error})")
 
     if extra_cleanup_path:
         try:

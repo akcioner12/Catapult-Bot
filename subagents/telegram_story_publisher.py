@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0") or 0)
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING", "")
+FOREX_EDU_CHAT_ID = int(os.getenv("FOREX_EDU_CHAT_ID", "0") or 0)
 
 STORY_PERIOD_SECONDS = 24 * 3600  # висит 24ч перед архивом — макс. охват без ручного продления
 
@@ -117,3 +118,37 @@ async def post_story(video_path: str, caption: str, link_url: str) -> tuple[bool
                 os.remove(upload_path)
             except Exception:
                 pass
+
+
+async def post_to_forex_edu_chat(video_path: str, caption: str) -> tuple[bool, str | None]:
+    """Отправляет video_path с подписью caption в чат «Чат по авто-трейдингу»
+    (FOREX_EDU_CHAT_ID) — тем же личным аккаунтом, что и Stories, т.к. он уже
+    состоит в этом чате. Возвращает (успех, причина_ошибки). Никогда не бросает
+    исключение."""
+    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH or not TELEGRAM_SESSION_STRING:
+        logger.warning("TELEGRAM_API_ID/HASH/SESSION_STRING не заданы — пропускаем отправку в чат автотрейдинга")
+        return False, None
+    if not FOREX_EDU_CHAT_ID:
+        logger.warning("FOREX_EDU_CHAT_ID не задан — пропускаем отправку в чат автотрейдинга")
+        return False, None
+    if not os.path.exists(video_path):
+        logger.error(f"post_to_forex_edu_chat: файл не найден {video_path}")
+        return False, "видео-файл не найден"
+
+    client = TelegramClient(StringSession(TELEGRAM_SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    try:
+        await client.connect()
+        await client.send_file(
+            types.PeerChat(chat_id=FOREX_EDU_CHAT_ID),
+            video_path,
+            caption=caption[:1024],
+            supports_streaming=True,
+        )
+        logger.info("✅ Видео отправлено в чат автотрейдинга")
+        return True, None
+    except Exception as e:
+        message = str(e)
+        logger.error(f"post_to_forex_edu_chat error: {message}")
+        return False, message
+    finally:
+        await client.disconnect()
