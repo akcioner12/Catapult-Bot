@@ -12,10 +12,11 @@ from datetime import datetime, date, timedelta
 import httpx
 
 from subagents.tg_monitor import collect_top_posts, sent_hashes, viral_score
-from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES, generate_forexbot_post, FOREXBOT_ANGLES, get_last_claude_error
+from subagents.rewriter import generate_post_claude, generate_catapult_post, generate_poll, CATAPULT_ANGLES, generate_forexbot_post, FOREXBOT_ANGLES, get_last_claude_error, generate_lesson_post
 from subagents.tg_publisher import pending_posts, approved_queue, send_for_approval, approval_keyboard, auto_approve_post, publish_now_auto, queue_action_keyboard, breaking_already_posted_today, catapult_already_posted_today, mark_breaking_posted
-from subagents.image_brief import generate_image_brief
+from subagents.image_brief import generate_image_brief, generate_lesson_image_brief
 from subagents.image_generator import generate_image
+from subagents import edu_progress
 from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
 from subagents.engagement_ideas import generate_engagement_idea
 from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
@@ -81,9 +82,9 @@ POLL_TOPICS = [
 catapult_angle_idx: int = 0   # текущий угол Catapult
 forexbot_angle_idx: int = 0   # текущий угол forexbot (fallback, если в источниках пусто)
 
-# Дни недели (по дню публикации, не по дню генерации накануне), когда слот
-# catapult_1 (11:00) остаётся про Catapult — остальные дни отдаются forexbot.
-CATAPULT_TEXT_DAYS = {"tue", "fri"}
+# Дни недели (по дню публикации), когда слот 11:00 (catapult_1) отдан forex-уроку —
+# бывшие Catapult-дни. Остальные дни слот 11:00 — про forexbot.
+FOREX_BONUS_LESSON_DAYS = {"tue", "fri"}
 poll_idx: int = 0             # текущий fallback-опрос (если генерация не удалась)
 last_poll_date: str = ""      # дата последнего опубликованного опроса (YYYY-MM-DD) — для логики "раз в 2 дня"
 self_record_category_idx: int = 0  # текущая категория для предложения самозаписи
@@ -210,7 +211,7 @@ async def is_catapult_urgent(post_text: str) -> bool:
 # ── Проверка горячих новостей (каждый час) ────────────────────────────────────
 async def check_breaking_news():
     logger.info("=== Проверка горячих новостей ===")
-    for category in ["crypto", "ai", "forex", "catapult"]:
+    for category in ["crypto", "ai", "forex"]:
         if breaking_already_posted_today(category):
             logger.info(f"[{category}] Горячая новость уже публиковалась сегодня — пропускаем до завтра")
             continue
@@ -276,38 +277,38 @@ async def evening_generation():
             }
         )
 
-    async def _auto_post(text: str, category: str, slot: str, source: str = "", label: str = ""):
+    async def _auto_post(text: str, category: str, slot: str, source: str = "", label: str = "", brief: str | None = None):
         if not text:
             reason = get_last_claude_error() or "пустой ответ от Claude"
             logger.warning(f"[{slot}] Пустой текст поста — пропускаем (сбой генерации: {reason})")
             failures.append((label or slot, reason))
             return
-        brief = await generate_image_brief(text, category)
+        if brief is None:
+            brief = await generate_image_brief(text, category)
         photo_path = await generate_image(brief, f"{slot}_{int(datetime.utcnow().timestamp())}")
         await auto_approve_post(text, category, slot, brief, photo_path, source)
         await asyncio.sleep(2)
 
-    # 1. Крипта #1 (09:00)
-    crypto_posts = await collect_top_posts("crypto")
-    if crypto_posts:
-        text = await generate_post_claude(crypto_posts, "crypto")
-        await _auto_post(text, "crypto", "crypto_1", crypto_posts[0]["channel"], label="Крипта #1 (09:00)")
-        for p in crypto_posts:
-            sent_hashes.add(p["hash"])
+    tomorrow = datetime.now(KYIV_TZ) + timedelta(days=1)
+    tomorrow_str = tomorrow.date().isoformat()
+    tomorrow_day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][tomorrow.weekday()]
 
-    # 2. Catapult #1 / forexbot (11:00) — публикуется завтра, поэтому смотрим на
-    # день недели ЗАВТРА, а не сегодня, чтобы попасть в CATAPULT_TEXT_DAYS верно.
-    tomorrow_day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][(datetime.now(KYIV_TZ) + timedelta(days=1)).weekday()]
-    if tomorrow_day_key in CATAPULT_TEXT_DAYS:
-        catapult_posts = await collect_top_posts("catapult")
-        if catapult_posts:
-            text = await generate_post_claude(catapult_posts, "catapult")
-            await _auto_post(text, "catapult", "catapult_1", catapult_posts[0]["channel"], label="Catapult (11:00)")
-        else:
-            angle1 = CATAPULT_ANGLES[catapult_angle_idx % len(CATAPULT_ANGLES)]
-            catapult_angle_idx += 1
-            text = await generate_catapult_post(angle1)
-            await _auto_post(text, "catapult", "catapult_1", label="Catapult (11:00)")
+    async def _lesson_post(category: str, slot: str, role: str, label: str, bonus: bool = False):
+        lesson = await edu_progress.get_lesson(category, tomorrow_str, bonus=bonus)
+        if not lesson:
+            failures.append((label, "не удалось получить следующий урок"))
+            return
+        text = await generate_lesson_post(lesson, category, role)
+        brief = await generate_lesson_image_brief(lesson, category) if text else None
+        await _auto_post(text, category, slot, f"урок {lesson['number']}: {lesson['title']}", label, brief)
+
+    # 1. Крипта #1 (09:00) — основной урок дня
+    await _lesson_post("crypto", "crypto_1", "lesson", "Крипта #1 (09:00)")
+
+    # 2. Слот 11:00 (catapult_1): по вт/пт — дополнительный forex-урок, в остальные дни — forexbot.
+    # Публикуется завтра, поэтому смотрим на день недели ЗАВТРА (tomorrow_day_key).
+    if tomorrow_day_key in FOREX_BONUS_LESSON_DAYS:
+        await _lesson_post("forex", "catapult_1", "lesson", "Forex урок (11:00)", bonus=True)
     else:
         forexbot_posts = await collect_top_posts("forexbot")
         if forexbot_posts:
@@ -320,10 +321,7 @@ async def evening_generation():
             await _auto_post(text, "forexbot", "catapult_1", label="Forexbot (11:00)")
 
     # 3. ИИ (13:00)
-    ai_posts = await collect_top_posts("ai")
-    if ai_posts:
-        text = await generate_post_claude(ai_posts, "ai")
-        await _auto_post(text, "ai", "ai", ai_posts[0]["channel"], label="AI (13:00)")
+    await _lesson_post("ai", "ai", "lesson", "AI (13:00)")
 
     # 4. Опрос (раз в 2 дня — 16:30) — авто-одобряем, с картинкой
     global last_poll_date
@@ -382,19 +380,10 @@ async def evening_generation():
         logger.info(f"Опрос пропущен — последний был {last_poll_date}, следующий через {days_left} дн.")
 
     # 5. Форекс (18:00)
-    forex_posts = await collect_top_posts("forex")
-    if forex_posts:
-        text = await generate_post_claude(forex_posts, "forex")
-        await _auto_post(text, "forex", "forex", forex_posts[0]["channel"], label="Forex (18:00)")
+    await _lesson_post("forex", "forex", "lesson", "Forex (18:00)")
 
-    # 6. Крипта #2 (20:00)
-    crypto_posts_evening = await collect_top_posts("crypto")
-    if crypto_posts_evening:
-        text = await generate_post_claude(crypto_posts_evening, "crypto")
-        await _auto_post(text, "crypto", "crypto_2", crypto_posts_evening[0]["channel"], label="Крипта #2 (20:00)")
-    elif crypto_posts:
-        text = await generate_post_claude(crypto_posts, "crypto")
-        await _auto_post(text, "crypto", "crypto_2", crypto_posts[0]["channel"], label="Крипта #2 (20:00)")
+    # 6. Крипта #2 (20:00) — закрепление урока дня
+    await _lesson_post("crypto", "crypto_2", "practice", "Крипта #2 (20:00)")
 
     if failures:
         failed_lines = "\n".join(f"• {label} — {reason}" for label, reason in failures)
@@ -436,7 +425,7 @@ async def _collect_topic_source(category: str) -> str:
 # ── Дайджест тем + готовых комментариев для ручного engagement в TikTok/Instagram ──
 async def get_engagement_digest() -> str:
     lines = ["💬 <b>Идеи для комментариев в TikTok/Instagram</b>\n"]
-    for category in ["crypto", "ai", "forex", "catapult", "forexbot"]:
+    for category in ["crypto", "ai", "forex", "forexbot"]:
         topic_source = await _collect_topic_source(category)
         idea = await generate_engagement_idea(topic_source, category)
         if not idea:
@@ -555,7 +544,7 @@ async def propose_self_record_script():
     global self_record_category_idx
     logger.info("=== Предложение темы для самозаписи ===")
 
-    categories = ["crypto", "ai", "forex", "catapult", "forexbot"]
+    categories = ["crypto", "ai", "forex", "forexbot"]
     category = categories[self_record_category_idx % len(categories)]
     self_record_category_idx += 1
 
