@@ -10,6 +10,7 @@ from datetime import datetime
 import httpx
 
 from subagents.tg_monitor import viral_score
+from subagents.edu_curriculum import LEVEL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,24 @@ STYLE_GUIDE = f"""Ты — автор Telegram канала «Крипта, AI, 
 - НИКАКОГО markdown форматирования!
 
 {NEUTRALITY_NOTE}"""
+
+LESSON_CONTEXT = {
+    "crypto": "криптовалюты и трейдинг на криптобиржах",
+    "forex":  "Forex и технический анализ валютных пар",
+    "ai":     "искусственный интеллект и заработок/автоматизация с его помощью",
+}
+
+LESSON_ROLE_INSTRUCTION = {
+    "lesson": (
+        "Полноценный урок: хук-вопрос из жизни новичка → объяснение простыми словами → "
+        "конкретный пример с цифрами → 3-5 шагов или чек-лист → одна типичная ошибка → "
+        "тизер следующего урока."
+    ),
+    "practice": (
+        "Закрепление ТОГО ЖЕ урока, без повторного объяснения с нуля: 3-5 типичных ошибок новичков "
+        "по теме и как их избежать, затем мини-квиз из 2 вопросов (ответы дай отдельной строкой в конце)."
+    ),
+}
 
 async def generate_post_claude(posts: list, category: str) -> str:
     context = {
@@ -152,6 +171,49 @@ async def generate_post_claude(posts: list, category: str) -> str:
             return ""
     except Exception as e:
         logger.error(f"Claude error: {e}")
+        _record_claude_error(e)
+        return ""
+
+# ── Claude API — обучающий пост-урок ──────────────────────────────────────────
+async def generate_lesson_post(lesson: dict, category: str, role: str = "lesson") -> str:
+    prompt = f"""{STYLE_GUIDE}
+
+Это ОБУЧАЮЩИЙ пост для рубрики: {LESSON_CONTEXT.get(category, 'финансы')}.
+Урок №{lesson['number']}: {lesson['title']}
+Уровень: {LEVEL_NAMES.get(lesson['level'], '')}
+Что раскрыть: {lesson['points']}
+
+Формат: {LESSON_ROLE_INSTRUCTION.get(role, LESSON_ROLE_INSTRUCTION['lesson'])}
+После приветствия — строка заголовка: 📚 <b>Урок {lesson['number']}. {lesson['title']}</b>
+Пиши для новичка, без сложного жаргона (термины сразу поясняй). Не обещай гарантированную прибыль, не давай персональных финансовых советов, честно упоминай риски там, где они есть.
+
+В конце добавь: 💬 Обсуждаем это здесь: {COMMUNITY_CHAT_LINK}
+
+Только готовый пост, без пояснений."""
+
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 1400,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+            logger.error(f"Claude lesson error: {data}")
+            _record_claude_error(data)
+            return ""
+    except Exception as e:
+        logger.error(f"Claude lesson error: {e}")
         _record_claude_error(e)
         return ""
 

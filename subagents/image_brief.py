@@ -60,3 +60,43 @@ async def generate_image_brief(post_text: str, category: str) -> str:
     except Exception as e:
         logger.error(f"Brief error: {e}")
     return f"Фотореалистичная картинка на тему {category}, тёмный фон, неоновые цвета, 1200x630px."
+
+# ── ТЗ для картинки-схемы к уроку ─────────────────────────────────────────────
+async def generate_lesson_image_brief(lesson: dict, category: str) -> str:
+    style = CATEGORY_STYLE.get(category, CATEGORY_STYLE["crypto"])
+    fallback = (
+        f"Чистая образовательная инфографика на тему «{lesson['title']}»: понятная схема с "
+        f"2-3 короткими подписями на английском, {style}, минимализм, кинематографично."
+    )
+    prompt = f"""Составь короткое ТЗ на образовательную картинку-схему к уроку для новичков.
+
+Урок: {lesson['title']}
+Суть: {lesson['points']}
+
+Это не абстрактный баннер, а наглядная схема/инфографика, которая объясняет идею урока (например: график со свечой и подписями, стрелки, блок-схема шагов).
+Стиль: {style}, минимализм, хорошая читаемость.
+Текст на картинке — не более 3-4 коротких подписей на английском, без длинных фраз.
+
+Напиши ТЗ в 2-3 предложения простым текстом, без markdown."""
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                CLAUDE_API_URL,
+                headers={
+                    "x-api-key": CLAUDE_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 250,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+            )
+            data = resp.json()
+            if "content" in data:
+                return data["content"][0]["text"]
+    except Exception as e:
+        logger.error(f"Lesson brief error: {e}")
+    return fallback
