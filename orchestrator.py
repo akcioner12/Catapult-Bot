@@ -19,7 +19,7 @@ from subagents.image_generator import generate_image
 from subagents import edu_progress
 from subagents.yt_ideas import get_trending_shorts_ideas, get_trending_coins
 from subagents.engagement_ideas import generate_engagement_idea
-from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata
+from subagents.yt_script import generate_video_script, generate_self_record_script, generate_video_metadata, generate_lesson_video_script
 from subagents.yt_voice import generate_voiceover
 from subagents.yt_render import render_video
 from subagents.avatar_generator import generate_avatar_video
@@ -407,6 +407,21 @@ async def evening_generation():
 
     await generate_tomorrows_videos()
 
+EDU_VIDEO_CATEGORIES = {"crypto", "forex", "ai"}
+
+async def _has_breaking_candidate(category: str) -> bool:
+    """True, если лучший свежий пост по рубрике проходит проверку «кричащей» новости
+    (те же критерии, что у часового механизма горячих постов)."""
+    posts = await collect_top_posts(category)
+    if not posts:
+        return False
+    top = posts[0]
+    if top.get("date"):
+        age_hours = (datetime.utcnow() - top["date"]).total_seconds() / 3600
+        if age_hours > BREAKING_MAX_AGE_HOURS:
+            return False
+    return await is_truly_breaking(top["text"])
+
 # ── Сбор горячих тем по категории (общее для видео и engagement-дайджеста) ────
 async def _collect_topic_source(category: str) -> str:
     posts = await collect_top_posts(category)
@@ -437,10 +452,18 @@ async def get_engagement_digest() -> str:
     return "\n".join(lines)
 
 # ── Еженедельная генерация 14 видео (только ручной запуск через /generate_video) ──
-async def _generate_and_queue_video(category: str, planned_day: str, planned_time: str):
-    topic_source = await _collect_topic_source(category)
-
-    script_data = await generate_video_script(topic_source, category)
+async def _generate_and_queue_video(category: str, planned_day: str, planned_time: str, lesson_date: str | None = None):
+    script_data = None
+    if category in EDU_VIDEO_CATEGORIES and not await _has_breaking_candidate(category):
+        day = lesson_date or (datetime.now(KYIV_TZ) + timedelta(days=1)).date().isoformat()
+        lesson = await edu_progress.get_lesson(category, day)
+        if lesson:
+            script_data = await generate_lesson_video_script(lesson, category)
+        else:
+            logger.warning(f"_generate_and_queue_video[{category}]: не удалось получить урок")
+    else:
+        topic_source = await _collect_topic_source(category)
+        script_data = await generate_video_script(topic_source, category)
     if not script_data:
         reason = get_last_claude_error() or "неизвестная ошибка Claude"
         logger.warning(f"_generate_and_queue_video[{category}]: сбой генерации сценария — пропускаем ({reason})")
@@ -534,9 +557,10 @@ async def generate_tomorrows_videos():
     tomorrow = datetime.now(KYIV_TZ) + timedelta(days=1)
     day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][tomorrow.weekday()]
     entries = [e for e in WEEKLY_SCHEDULE if e["day"] == day_key]
+    tomorrow_str = tomorrow.date().isoformat()
     for entry in entries:
         planned_time = f'{entry["hour"]:02d}:{entry["minute"]:02d}'
-        await _generate_and_queue_video(entry["category"], entry["day"], planned_time)
+        await _generate_and_queue_video(entry["category"], entry["day"], planned_time, lesson_date=tomorrow_str)
         await asyncio.sleep(2)
 
 # ── Еженедельное предложение темы для самозаписи (вс, 19:05) ─────────────────

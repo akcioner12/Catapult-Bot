@@ -73,18 +73,7 @@ async def _call_claude(prompt: str, max_tokens: int) -> str | None:
         _record_claude_error(e)
         return None
 
-# ── Сценарий для авто-озвучки ─────────────────────────────────────────────────
-FOREX_EDU_TOPICS = (
-    "свечной паттерн (молот, поглощение, доджи, звезда и т.п.), фигура на графике "
-    "(голова-плечи, треугольник, флаг, двойная вершина/дно), сетка Фибоначчи, "
-    "индикатор (RSI, MACD, скользящие средние, полосы Боллинджера), волновой анализ, "
-    "риск-менеджмент и стоп-лосс, точки входа, торговля на новостях"
-)
-
-FOREX_TOPIC_INSTRUCTION = f"""Если среди кандидатов выше есть по-настоящему горячая, срочная forex-новость (резкое движение валютной пары, решение центробанка, важная макростатистика) — выбери именно её и напиши сценарий про эту новость.
-
-Если среди кандидатов НЕТ ничего действительно горячего — вместо новости выбери ОДНУ тему из технического анализа и трейдинга ({FOREX_EDU_TOPICS}) и объясни её просто, с конкретным примером — обучающий контент для тех, кто хочет разобраться в трейдинге. Не смешивай новость и обучение в одном ролике, выбери что-то одно."""
-
+# ── Сценарий для авто-озвучки (новостной — только для «кричащих» новостей) ───
 DEFAULT_TOPIC_INSTRUCTION = "Выбери ОДНУ самую резонансную, горячую историю из кандидатов выше и напиши сценарий именно про неё — не пытайся смешать несколько тем в одну. Если ни один кандидат не выглядит по-настоящему интересным, возьми {context} как тему в целом."
 
 FOREX_CLOSING_INSTRUCTION = """
@@ -93,12 +82,8 @@ FOREX_CLOSING_INSTRUCTION = """
 async def generate_video_script(topic_source: str, category: str) -> dict | None:
     style = CATEGORY_STYLE.get(category, CATEGORY_STYLE["crypto"])
     context = CONTEXT_BY_CATEGORY.get(category, "финансы")
-    if category == "forex":
-        topic_instruction = FOREX_TOPIC_INSTRUCTION
-        closing_instruction = FOREX_CLOSING_INSTRUCTION
-    else:
-        topic_instruction = DEFAULT_TOPIC_INSTRUCTION.format(context=context)
-        closing_instruction = ""
+    topic_instruction = DEFAULT_TOPIC_INSTRUCTION.format(context=context)
+    closing_instruction = FOREX_CLOSING_INSTRUCTION if category == "forex" else ""
     prompt = f"""Ты — автор вертикальных YouTube Shorts для канала «Крипта, AI, Forex. Как заработать?» (тот же канал, что и в Telegram @Crypto_AI_Forex).
 
 Сценарий пишется для озвучки диктором (TTS) — только то, что должно прозвучать. Без эмодзи, без HTML-тегов, без ремарок в скобках.
@@ -140,6 +125,41 @@ def _parse_script(raw: str) -> dict | None:
     if not narration or not image_briefs:
         return None
     return {"narration": narration, "image_briefs": image_briefs}
+
+# ── Сценарий обучающего ролика (короткая версия урока дня) ───────────────────
+LESSON_VIDEO_CLOSING = {
+    "forex": FOREX_CLOSING_INSTRUCTION,
+    "crypto": "\nВ конце — короткий призыв подписаться, чтобы не пропустить следующие уроки по трейдингу на крипте (1 предложение).",
+    "ai": "\nВ конце — короткий призыв подписаться, чтобы не пропустить следующие уроки по ИИ (1 предложение).",
+}
+
+async def generate_lesson_video_script(lesson: dict, category: str) -> dict | None:
+    style = CATEGORY_STYLE.get(category, CATEGORY_STYLE["crypto"])
+    prompt = f"""Ты — автор вертикальных YouTube Shorts для канала «Крипта, AI, Forex. Как заработать?».
+
+Сценарий пишется для озвучки диктором (TTS) — только то, что должно прозвучать. Без эмодзи, без HTML-тегов, без ремарок в скобках.
+Стиль: живо, по делу, крючок в первые 2 секунды, 90-150 слов (30-60 секунд речи).
+
+Это ОБУЧАЮЩИЙ ролик — короткая версия урока №{lesson['number']}: {lesson['title']}
+Суть: {lesson['points']}
+Объясняй просто, для новичка, с одним конкретным примером. Не обещай гарантированной прибыли, не давай персональных финансовых советов.
+{LESSON_VIDEO_CLOSING.get(category, '')}
+
+Напиши сценарий и 2-4 ТЗ для картинок-схем, которые сменяют друг друга под озвучку. Каждое ТЗ — наглядная схема/инфографика по теме урока (не абстрактный баннер), стиль: {style}, не более 3-4 коротких подписей на английском.
+
+{NEUTRALITY_NOTE}
+
+Ответь СТРОГО в этом формате, без пояснений:
+SCRIPT:
+<текст для озвучки>
+IMAGE 1: <ТЗ для картинки одним предложением>
+IMAGE 2: <ТЗ для картинки одним предложением>
+IMAGE 3: <ТЗ для картинки одним предложением>"""
+
+    raw = await _call_claude(prompt, max_tokens=800)
+    if not raw:
+        return None
+    return _parse_script(raw)
 
 # ── Сценарий для самозаписи ───────────────────────────────────────────────────
 async def generate_self_record_script(category: str) -> dict | None:
