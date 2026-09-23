@@ -27,12 +27,6 @@ STORY_PERIOD_SECONDS = 24 * 3600  # висит 24ч перед архивом �
 # на ~1.3 Мбит/с проходило. Порог с запасом ниже наблюдавшегося рабочего уровня.
 MAX_VIDEO_BITRATE = 1_600_000
 
-# Тот же MEDIA_FILE_INVALID отдельно ловился и на видео 55.52с при нормальном
-# битрейте (~1.5 Мбит/с) — подтверждено вживую 23.09: тот же файл, обрезанный
-# до 14с, прошёл. Реальный порог длительности неизвестен (проверено только
-# 14с=ок / 55.52с=нет), это провизорный запас с изрядным зазором вниз.
-MAX_STORY_DURATION_SECONDS = 20
-
 # Позиция кликабельного стикера-ссылки — узкая полоса ближе к низу кадра,
 # координаты/размеры в процентах от кадра (x/y — центр области).
 LINK_AREA_COORDINATES = types.MediaAreaCoordinates(x=50.0, y=90.0, w=90.0, h=8.0, rotation=0.0)
@@ -43,9 +37,7 @@ async def _prepare_for_story(video_path: str) -> str:
     перекодирует с ограниченным битрейтом (и сразу с faststart). Иначе делает
     дешёвый remux (stream copy) под faststart — ffmpeg по умолчанию пишет moov atom
     в конец файла, а Telegram при SendStoryRequest на таких файлах иногда отдаёт
-    MEDIA_FILE_INVALID, даже если кодек/битрейт в порядке. Если видео длиннее
-    MAX_STORY_DURATION_SECONDS — дополнительно обрезает до этой длины (та же
-    причина MEDIA_FILE_INVALID, не только битрейт). При сбое любого шага —
+    MEDIA_FILE_INVALID, даже если кодек/битрейт в порядке. При сбое любого шага —
     возвращает video_path без изменений (пусть Telegram сам решит)."""
     proc = await asyncio.create_subprocess_exec(
         "ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -58,21 +50,10 @@ async def _prepare_for_story(video_path: str) -> str:
     except ValueError:
         bitrate = 0
 
-    proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video_path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
-    try:
-        duration = float(stdout.decode().strip())
-    except ValueError:
-        duration = 0.0
-    trim_args = ["-t", str(MAX_STORY_DURATION_SECONDS)] if duration > MAX_STORY_DURATION_SECONDS else []
-
     if bitrate > MAX_VIDEO_BITRATE:
         safe_path = f"{video_path.rsplit('.', 1)[0]}_storysafe.mp4"
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", video_path, *trim_args,
+            "ffmpeg", "-y", "-i", video_path,
             "-c:v", "libx264", "-b:v", str(MAX_VIDEO_BITRATE),
             "-maxrate", str(MAX_VIDEO_BITRATE), "-bufsize", str(MAX_VIDEO_BITRATE * 2),
             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
@@ -81,22 +62,20 @@ async def _prepare_for_story(video_path: str) -> str:
         )
         _, stderr = await proc.communicate()
         if proc.returncode == 0:
-            logger.info(f"Stories: перекодировано под безопасный битрейт ({bitrate} -> {MAX_VIDEO_BITRATE})" + (f", обрезано до {MAX_STORY_DURATION_SECONDS}с" if trim_args else ""))
+            logger.info(f"Stories: перекодировано под безопасный битрейт ({bitrate} -> {MAX_VIDEO_BITRATE})")
             return safe_path
         logger.error(f"_prepare_for_story: ffmpeg re-encode failed: {stderr.decode()[-500:]}")
         return video_path
 
     faststart_path = f"{video_path.rsplit('.', 1)[0]}_faststart.mp4"
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-y", "-i", video_path, *trim_args, "-c", "copy", "-movflags", "+faststart", faststart_path,
+        "ffmpeg", "-y", "-i", video_path, "-c", "copy", "-movflags", "+faststart", faststart_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await proc.communicate()
     if proc.returncode != 0:
         logger.error(f"_prepare_for_story: faststart remux failed: {stderr.decode()[-500:]}")
         return video_path
-    if trim_args:
-        logger.info(f"Stories: обрезано до {MAX_STORY_DURATION_SECONDS}с ({duration:.1f}с -> {MAX_STORY_DURATION_SECONDS}с)")
     return faststart_path
 
 
