@@ -41,6 +41,11 @@ FAILED_UPLOADS_FILE = "/data/failed_uploads.json"
 
 KYIV_TZ = ZoneInfo("Europe/Kiev")
 
+# TikTok временно отключён 08.10.2026 — контент не набирал просмотров ~3 недели,
+# пользователь решил пересмотреть подход к контенту для площадки, прежде чем
+# продолжать туда публиковать. Включить обратно — поставить True.
+TIKTOK_ENABLED = False
+
 WEEKLY_SCHEDULE = [
     {"day": "mon", "hour": 8,  "minute": 30, "category": "forex"},
     {"day": "mon", "hour": 19, "minute": 0,  "category": "crypto"},
@@ -566,7 +571,11 @@ async def _finish_publish(video_id: str, video: dict, youtube_id: str):
 
     status_lines = [f"✅ YouTube: https://youtu.be/{youtube_id}"]
 
-    if video.get("skip_tiktok"):
+    if not TIKTOK_ENABLED:
+        status_lines.append("⏭️ TikTok отключён (временно)")
+        safe_video_path = video["video_path"]
+        safe_caption = _tiktok_caption(video)
+    elif video.get("skip_tiktok"):
         status_lines.append("⏭️ TikTok пропущен (по запросу)")
         safe_video_path = video["video_path"]
         safe_caption = _tiktok_caption(video)

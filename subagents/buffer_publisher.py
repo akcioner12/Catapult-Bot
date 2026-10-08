@@ -99,8 +99,8 @@ async def publish_to_buffer(
                 logger.error(f"Buffer createPost: неожиданный ответ: {data}")
                 return None, "неожиданный ответ Buffer"
 
-            for _ in range(72):  # до ~6 минут ожидания публикации — на новом TikTok-канале подтверждение реально приходит за 2.5-3 минуты, 2 минуты давали ложные "не удалось" при фактически успешной публикации
-                await asyncio.sleep(5)
+            for _ in range(24):  # до ~6 минут ожидания публикации (24×15с) — на новом TikTok-канале подтверждение реально приходит за 2.5-3 минуты, 2 минуты давали ложные "не удалось" при фактически успешной публикации. Интервал увеличен с 5 до 15с 08.10 — опрос раз в 5с жёг бюджет Buffer API (3000 запросов/30 дней), втрое меньше запросов на тот же срок ожидания
+                await asyncio.sleep(15)
                 status_resp = await client.post(
                     BUFFER_URL,
                     headers=headers,
@@ -127,7 +127,7 @@ async def publish_to_buffer(
                     return None, reason
 
             logger.error("Buffer: публикация не завершилась за отведённое время")
-            return None, "публикация не завершилась за 2 минуты"
+            return None, "публикация не завершилась за 6 минут"
     except Exception as e:
         logger.error(f"publish_to_buffer error: {e}")
         return None, str(e)
